@@ -72,19 +72,8 @@ def get_recent_filings(cik, form_types = ("10-K", "10-Q"), limit=10):
             break
     return filings
 
-if __name__ == "__main__":
-    test_ticker = "AAPL"
-    cik = get_cik_from_ticker(test_ticker)
-    print(f"CIK for {test_ticker}: {cik}")
-
-    print()
-
-    filings = get_recent_filings(cik)
-    print(f"Recent 10K/10Q filings for {test_ticker} (CIK: {cik}):")
-    for f in filings:
-        print(f"- {f['form_type']} filed on {f['filing_date']} (Accession: {f['accession_number']}, Document: {f['primary_document']})")
     
-    def build_filing_url(cik, accession_number, primary_document):
+def build_filing_url(cik, accession_number, primary_document):
         """
         Construct the URL to access the filing document on SEC's EDGAR system.
 
@@ -99,8 +88,41 @@ if __name__ == "__main__":
         base_url = "https://www.sec.gov/Archives/edgar/data"
         cik_no_padding = cik.lstrip("0")  # Remove leading zeros for URL
         return f"{base_url}/{cik_no_padding}/{accession_number.replace('-', '')}/{primary_document}"
+
+def get_company_facts(cik):
+    """
+    Fetch the company facts data for a given CIK.
+
+    Args:
+    cik: 10-digit zero-padded CIK as a string (e.g., "0000320193")
+
+    Returns:
+    Dictionary containing company facts data.
+    """
+    FACTS_API_URL = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+    response = requests.get(FACTS_API_URL, headers = {"User-Agent": USER_AGENT})
+    response.raise_for_status()
+    data = response.json()
+    return data
     
-    first = filings[0]
-    url = build_filing_url(cik, first["accession_number"], first["primary_document"])
-    print(f"First filing: {first['form_type']} on {first['filing_date']}")
-    print(f"URL: {url}")
+if __name__ == "__main__":
+    test_tickers = ["AAPL", "MSFT", "GOOGL"]
+    for t in test_tickers:
+        cik = get_cik_from_ticker(t)
+        print(f"{t} -> CIK: {cik}")
+    
+    print()
+
+    apple_cik = get_cik_from_ticker("AAPL")
+
+    filings = get_recent_filings(apple_cik)
+    print(f"Recent 10k/10Q filings for AAPL (CIK {apple_cik}):")
+    for f in filings:
+        url = build_filing_url(apple_cik, f["accession_number"], f["primary_document"])
+        print(f"{f['form_type']} filed on {f['filing_date']} - {url}")
+    
+    print()
+
+    facts = get_company_facts(apple_cik)
+    print(f"Entity: {facts['entityName']}")
+    print(f"Number of us-gaap concepts: {len(facts['facts']['us-gaap'])}")
