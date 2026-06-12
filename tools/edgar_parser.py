@@ -83,3 +83,24 @@ if __name__ == "__main__":
     print(f"Recent 10K/10Q filings for {test_ticker} (CIK: {cik}):")
     for f in filings:
         print(f"- {f['form_type']} filed on {f['filing_date']} (Accession: {f['accession_number']}, Document: {f['primary_document']})")
+    
+    def build_filing_url(cik, accession_number, primary_document):
+        """
+        Construct the URL to access the filing document on SEC's EDGAR system.
+
+        Args:
+        cik: 10-digit zero-padded CIK as a string (e.g., "0000320193")
+        accession_number: Accession number of the filing (e.g., "0000320193-23-000010")
+        primary_document: Primary document name (e.g., "a10-k20221231.htm")
+
+        Returns:
+        URL string to access the filing document.
+        """
+        base_url = "https://www.sec.gov/Archives/edgar/data"
+        cik_no_padding = cik.lstrip("0")  # Remove leading zeros for URL
+        return f"{base_url}/{cik_no_padding}/{accession_number.replace('-', '')}/{primary_document}"
+    
+    first = filings[0]
+    url = build_filing_url(cik, first["accession_number"], first["primary_document"])
+    print(f"First filing: {first['form_type']} on {first['filing_date']}")
+    print(f"URL: {url}")
