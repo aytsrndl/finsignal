@@ -128,9 +128,42 @@ def get_concept_values(facts, concept):
     for entry in concept_data:
         values.append({
             "date": entry["end"],
-            "value": entry["val"]
+            "value": entry["val"],
+            "fy": entry.get("fy"),       # fiscal year
+            "fp": entry.get("fp"),       # fiscal period ("FY", "Q1", etc.)
+            "form": entry.get("form"),
         })
     return values
+
+def get_annual_values(facts, concept):
+    """
+    Extract clean, deduplicated annual values for a specific financial concept from the company facts data.
+
+    Keeps only annual figures (from 10K filings, full-year period),
+    removes duplicate years and sorts chronologically,
+
+    Args:
+    facts: Dictionary containing company facts data (from get_company_facts)
+    concept: The financial concept to extract (e.g., "Assets", "Liabilities")
+
+    Returns:
+    List of dicts with 'year', 'date', and 'value' keys, sorted by year ascending.
+    """
+    concept_data = get_concept_values(facts, concept)
+    annual_values = {}
+    for entry in concept_data:
+        if entry.get("fp") == "FY" and entry.get("form") == "10-K":  # Only consider full-year data
+            year = entry["date"][:4]  # Extract year from date string
+            if year not in annual_values:
+                annual_values[year] = {
+                    "year": year,
+                    "date": entry["date"],
+                    "value": entry["value"]
+                }
+    result = sorted(annual_values.values(), key=lambda x: x["year"])
+    return result
+        
+
 
 if __name__ == "__main__":
     test_tickers = ["AAPL", "MSFT", "GOOGL"]
@@ -158,3 +191,8 @@ if __name__ == "__main__":
     print(f"Assets time series for AAPL:")
     for v in assets_values:
         print(f"Date: {v['date']}, Value: {v['value']}")
+
+    annual_assets = get_annual_values(facts, "Assets")
+    print(f"Annual Assets for AAPL:")
+    for v in annual_assets:
+        print(f"Year: {v['year']}, Date: {v['date']}, Value: {v['value']}")
