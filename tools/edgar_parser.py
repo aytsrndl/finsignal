@@ -104,7 +104,34 @@ def get_company_facts(cik):
     response.raise_for_status()
     data = response.json()
     return data
+
+def get_concept_values(facts, concept):
+    """
+    Extract a clean time-series value for a specific financial concept from the company facts data.
+
+    Args:
+    facts: Dictionary containing company facts data (from get_company_facts)
+    concept: The financial concept to extract (e.g., "Assets", "Liabilities")
+
+    Returns:
+    List of dicts with 'date' and 'value' keys.
+
+    Raises:
+    KeyError: If the concept is not found in the facts data.
+    """
+    try:
+        concept_data = facts["facts"]["us-gaap"][concept]["units"]["USD"]
+    except KeyError:
+        raise KeyError(f"Concept '{concept}' not found in company facts data.")
     
+    values = []
+    for entry in concept_data:
+        values.append({
+            "date": entry["end"],
+            "value": entry["val"]
+        })
+    return values
+
 if __name__ == "__main__":
     test_tickers = ["AAPL", "MSFT", "GOOGL"]
     for t in test_tickers:
@@ -126,3 +153,8 @@ if __name__ == "__main__":
     facts = get_company_facts(apple_cik)
     print(f"Entity: {facts['entityName']}")
     print(f"Number of us-gaap concepts: {len(facts['facts']['us-gaap'])}")
+
+    assets_values = get_concept_values(facts, "Assets")
+    print(f"Assets time series for AAPL:")
+    for v in assets_values:
+        print(f"Date: {v['date']}, Value: {v['value']}")
