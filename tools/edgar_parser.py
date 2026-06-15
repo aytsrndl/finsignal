@@ -225,33 +225,56 @@ def get_revenue(facts, min_year = 2021):
 
     raise KeyError(f"No revenue data found for any of the candidate tags: {REVENUE_TAGS}")
 
+def calculate_ratio(facts, numerator_concept, denominator_concept):
+    """
+    Calculate a financial ratio for all years where both numerator and denominator are available.
+
+    Args:
+    facts: Dictionary containing company facts data (from get_company_facts)
+    numerator_concept: The financial concept to use as the numerator (e.g., "NetIncomeLoss")
+    denominator_concept: The financial concept to use as the denominator (e.g., "Revenues")
+
+    Returns:
+    List of dicts with 'year' and 'ratio', sorted by year ascending.
+    Years where the denominator is zero are skipped to avoid division errors.
+    """
+    numerator_values = get_annual_values(facts, numerator_concept)
+    denominator_values = get_annual_values(facts, denominator_concept)
+
+    denominator_by_year = {d["year"]: d["value"] for d in denominator_values}
+    ratios = []
+    for n in numerator_values:
+        year = n["year"]
+        if year not in denominator_by_year:
+            continue
+        denominator_value = denominator_by_year[year]
+        if denominator_value == 0:
+            continue
+        ratio = n["value"] / denominator_value
+        ratios.append({"year": year, "ratio": ratio})
+
+    return sorted(ratios, key=lambda x: x["year"])
+
 def calculate_debt_to_equity(facts):
     """
     Calculate the Debt-to-Equity ratio for all years available.
 
-    Args:
-    facts: Dictionary containing company facts data (from get_company_facts)
-
-    Returns:
-    List of dicts with 'year' and 'ratio', sorted by year ascending.
     """
-    liabilities = get_annual_values(facts, "Liabilities")
-    equity = get_annual_values(facts, "StockholdersEquity")
+    return calculate_ratio(facts, "Liabilities", "StockholdersEquity")
 
-    equity_by_year = {e["year"]: e["value"] for e in equity}
-    debt_to_equity = []
-    for l in liabilities:
-        year = l["year"]
-        if year not in equity_by_year:
-            continue
-        equity_value = equity_by_year[year]
-        if equity_value == 0:
-            continue
-        ratio = l["value"] / equity_value
-        debt_to_equity.append({"year": year, "ratio": ratio})
+def calculate_current_ratio(facts):
+    """
+    Calculate the Current Ratio (current assets / current liabilities) for all years available.
 
-    return sorted(debt_to_equity, key=lambda x: x["year"])
+    """
+    return calculate_ratio(facts, "AssetsCurrent", "LiabilitiesCurrent")
 
+def calculate_debt_to_assets(facts):
+    """
+    Calculate the Debt-to-Assets (total liabilities / total assets) ratio for all years available.
+
+    """
+    return calculate_ratio(facts, "Liabilities", "Assets")
 
 if __name__ == "__main__":
     test_tickers = ["AAPL", "MSFT", "GOOGL"]
@@ -294,7 +317,6 @@ if __name__ == "__main__":
             print(f"  {v['year']}: ${v['value']:,}  ({v['growth']:+.1%})")
     print("=== GROWTH TEST END ===")
 
-    # --- Check 8: Revenue resolver (Apple) ---
     apple_revenue = get_revenue(facts)
     print("\n=== APPLE REVENUE (2021+) ===")
     apple_growth = calculate_growth(apple_revenue)
@@ -302,7 +324,6 @@ if __name__ == "__main__":
         tag = "(baseline)" if v["growth"] is None else f"({v['growth']:+.1%})"
         print(f"  {v['year']}: ${v['value']:,}  {tag}")
 
-    # --- Check 9: Same resolver on Microsoft (does it generalize?) ---
     msft_cik = get_cik_from_ticker("MSFT")
     msft_facts = get_company_facts(msft_cik)
     msft_revenue = get_revenue(msft_facts)
@@ -317,4 +338,13 @@ if __name__ == "__main__":
     for point in de:
         print(f"  {point['year']}: {point['ratio']:.2f}")
 
+    cr = calculate_current_ratio(facts)
+    print("\n=== APPLE CURRENT RATIO ===")
+    for p in cr:
+        print(f"  {p['year']}: {p['ratio']:.2f}")
+
+    da = calculate_debt_to_assets(facts)
+    print("\n=== APPLE DEBT-TO-ASSETS ===")
+    for p in da:
+        print(f"  {p['year']}: {p['ratio']:.2f}")
 
