@@ -18,6 +18,11 @@ REVENUE_TAGS = [
     "Revenues",
 ]
 
+NET_INCOME_TAGS = [
+    "NetIncomeLoss",
+    "ProfitLoss",            # occasional alternative
+]
+
 def get_cik_from_ticker(ticker):
     """
     Fetch the 10-digit zero-padded CIK for a given ticker symbol
@@ -225,18 +230,20 @@ def get_revenue(facts, min_year = 2021):
 
     raise KeyError(f"No revenue data found for any of the candidate tags: {REVENUE_TAGS}")
 
-def calculate_ratio(facts, numerator_concept, denominator_concept):
+def calculate_ratio(facts, numerator_concept, denominator_concept, min_year=None):
     """
-    Calculate a financial ratio for all years where both numerator and denominator are available.
+    Calculate a financial ratio for all years where both numerator and
+    denominator are available.
 
     Args:
-    facts: Dictionary containing company facts data (from get_company_facts)
-    numerator_concept: The financial concept to use as the numerator (e.g., "NetIncomeLoss")
-    denominator_concept: The financial concept to use as the denominator (e.g., "Revenues")
+        facts: Dictionary containing company facts data (from get_company_facts)
+        numerator_concept: The us-gaap concept for the numerator.
+        denominator_concept: The us-gaap concept for the denominator.
+        min_year: If set, only include years >= this value (default None = all years).
 
     Returns:
-    List of dicts with 'year' and 'ratio', sorted by year ascending.
-    Years where the denominator is zero are skipped to avoid division errors.
+        List of dicts with 'year' and 'ratio', sorted by year ascending.
+        Years where the denominator is zero are skipped.
     """
     numerator_values = get_annual_values(facts, numerator_concept)
     denominator_values = get_annual_values(facts, denominator_concept)
@@ -245,6 +252,8 @@ def calculate_ratio(facts, numerator_concept, denominator_concept):
     ratios = []
     for n in numerator_values:
         year = n["year"]
+        if min_year is not None and int(year) < min_year:   # NEW: year filter
+            continue
         if year not in denominator_by_year:
             continue
         denominator_value = denominator_by_year[year]
@@ -275,6 +284,38 @@ def calculate_debt_to_assets(facts):
 
     """
     return calculate_ratio(facts, "Liabilities", "Assets")
+
+def calculate_roe(facts):
+    """Return on equity (net income / stockholders' equity) per year."""
+    return calculate_ratio(facts, "NetIncomeLoss", "StockholdersEquity", min_year=2021)
+
+def get_net_income(facts, min_year = 2021):
+    """
+    Get annual net income (or loss) values for a company, using a priority list of XBRL tags.
+
+    Tries each tag in NET_INCOME_TAGS in order, returning the first one that has data for the requested years.
+
+    Args:
+    facts: Dictionary containing company facts data (from get_company_facts)
+    min_year: Minimum year to consider for net income data (default: 2021)
+
+    Returns:
+    List of dicts with 'year', 'date', and 'value' keys, sorted by year ascending.
+
+    Raises:
+    KeyError:If none of the candidate tags are found.
+    """
+    for tag in NET_INCOME_TAGS:
+        try:
+            annual_values = get_annual_values(facts, tag)
+        except KeyError:
+            continue   # this tag isn't present; try the next one
+
+        filtered_values = [v for v in annual_values if int(v["year"]) >= min_year]
+        if filtered_values:
+           return filtered_values
+
+    raise KeyError(f"No net income data found for any of the candidate tags: {NET_INCOME_TAGS}")
 
 if __name__ == "__main__":
     test_tickers = ["AAPL", "MSFT", "GOOGL"]
@@ -347,4 +388,16 @@ if __name__ == "__main__":
     print("\n=== APPLE DEBT-TO-ASSETS ===")
     for p in da:
         print(f"  {p['year']}: {p['ratio']:.2f}")
+
+    roe = calculate_roe(facts)
+    print("\n=== APPLE ROE ===")
+    for p in roe:
+        print(f"  {p['year']}: {p['ratio']:.1%}")
+
+    apple_ni = get_net_income(facts)
+    ni_growth = calculate_growth(apple_ni)
+    print("\n=== APPLE NET INCOME GROWTH ===")
+    for v in ni_growth:
+        tag = "(baseline)" if v["growth"] is None else f"({v['growth']:+.1%})"
+        print(f"  {v['year']}: ${v['value']:,}  {tag}")
 
