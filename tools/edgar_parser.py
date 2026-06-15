@@ -264,31 +264,6 @@ def calculate_ratio(facts, numerator_concept, denominator_concept, min_year=None
 
     return sorted(ratios, key=lambda x: x["year"])
 
-def calculate_debt_to_equity(facts):
-    """
-    Calculate the Debt-to-Equity ratio for all years available.
-
-    """
-    return calculate_ratio(facts, "Liabilities", "StockholdersEquity")
-
-def calculate_current_ratio(facts):
-    """
-    Calculate the Current Ratio (current assets / current liabilities) for all years available.
-
-    """
-    return calculate_ratio(facts, "AssetsCurrent", "LiabilitiesCurrent")
-
-def calculate_debt_to_assets(facts):
-    """
-    Calculate the Debt-to-Assets (total liabilities / total assets) ratio for all years available.
-
-    """
-    return calculate_ratio(facts, "Liabilities", "Assets")
-
-def calculate_roe(facts):
-    """Return on equity (net income / stockholders' equity) per year."""
-    return calculate_ratio(facts, "NetIncomeLoss", "StockholdersEquity", min_year=2021)
-
 def get_net_income(facts, min_year = 2021):
     """
     Get annual net income (or loss) values for a company, using a priority list of XBRL tags.
@@ -316,6 +291,122 @@ def get_net_income(facts, min_year = 2021):
            return filtered_values
 
     raise KeyError(f"No net income data found for any of the candidate tags: {NET_INCOME_TAGS}")
+
+def calculate_net_margin(facts):
+    """
+    Calculate net margin (net income / revenue) for all years where both are available.
+
+    Uses get_revenue and get_net_income to resolve the appropriate tags for each.
+
+    Returns:
+        List of dicts with 'year' and 'net_margin', sorted by year ascending.
+    """
+    revenue_data = get_revenue(facts)
+    net_income_data = get_net_income(facts)
+
+    revenue_by_year = {r["year"]: r["value"] for r in revenue_data}
+    net_margin = []
+    for ni in net_income_data:
+        year = ni["year"]
+        if year not in revenue_by_year:
+            continue
+        revenue_value = revenue_by_year[year]
+        if revenue_value == 0:
+            continue
+        margin = ni["value"] / revenue_value
+        net_margin.append({"year": year, "net_margin": margin})
+
+    return sorted(net_margin, key=lambda x: x["year"])
+
+def get_total_liabilities(facts):
+    """
+    Derive total liabilities per year from the accounting identity:
+    Liabilities = Assets - StockholdersEquity.
+
+    More robust than a 'Liabilities' tag lookup, since not all companies
+    report total liabilities under that concept, but nearly all report
+    Assets and StockholdersEquity.
+
+    Args:
+        facts: The full facts dict from get_company_facts().
+
+    Returns:
+        List of dicts with 'year', 'date', 'value', sorted by year ascending.
+    """
+    assets = get_annual_values(facts, "Assets")
+    equity = get_annual_values(facts, "StockholdersEquity")
+
+    equity_by_year = {e["year"]: e["value"] for e in equity}
+    liabilities = []
+    for a in assets:
+        year = a["year"]
+        if year not in equity_by_year:
+            continue
+        liab_value = a["value"] - equity_by_year[year]
+        liabilities.append({
+            "year": year,
+            "date": a["date"],
+            "value": liab_value,
+        })
+
+    return sorted(liabilities, key=lambda x: x["year"])
+
+def _ratio_from_series(numerator_series, denominator_series, min_year=None):
+    """
+    Divide two pre-computed annual series, aligned by year. Internal helper
+    for ratios whose inputs are derived/resolved rather than raw tags.
+
+    Args:
+        numerator_series: list of {"year", "value", ...}
+        denominator_series: list of {"year", "value", ...}
+        min_year: if set, only include years >= this value.
+
+    Returns:
+        List of dicts with 'year' and 'ratio', sorted by year ascending.
+    """
+    denom_by_year = {d["year"]: d["value"] for d in denominator_series}
+    ratios = []
+    for n in numerator_series:
+        year = n["year"]
+        if min_year is not None and int(year) < min_year:
+            continue
+        if year not in denom_by_year:
+            continue
+        denom_value = denom_by_year[year]
+        if denom_value == 0:
+            continue
+        ratios.append({"year": year, "ratio": n["value"] / denom_value})
+
+    return sorted(ratios, key=lambda x: x["year"])
+
+def calculate_debt_to_equity(facts):
+    """
+    Calculate the Debt-to-Equity ratio for all years available.
+
+    """
+    liabilities = get_total_liabilities(facts)
+    equity = get_annual_values(facts, "StockholdersEquity")
+    return _ratio_from_series(liabilities, equity)
+
+def calculate_current_ratio(facts):
+    """
+    Calculate the Current Ratio (current assets / current liabilities) for all years available.
+
+    """
+    return calculate_ratio(facts, "AssetsCurrent", "LiabilitiesCurrent")
+
+def calculate_debt_to_assets(facts):
+    """
+    Calculate the Debt-to-Assets (total liabilities / total assets) ratio for all years available.
+
+    """
+    liabilities = get_total_liabilities(facts)
+    assets = get_annual_values(facts, "Assets")
+    return _ratio_from_series(liabilities, assets)
+
+def calculate_roe(facts):
+    """Return on equity (net income / stockholders' equity) per year."""
+    return calculate_ratio(facts, "NetIncomeLoss", "StockholdersEquity", min_year=2021)
 
 if __name__ == "__main__":
     test_tickers = ["AAPL", "MSFT", "GOOGL"]
@@ -400,4 +491,79 @@ if __name__ == "__main__":
     for v in ni_growth:
         tag = "(baseline)" if v["growth"] is None else f"({v['growth']:+.1%})"
         print(f"  {v['year']}: ${v['value']:,}  {tag}")
+
+    nm = calculate_net_margin(facts)
+    print("\n=== APPLE NET MARGIN ===")
+    for p in nm:
+        print(f"  {p['year']}: {p['net_margin']:.1%}")
+
+def run_all_metrics(ticker):
+    """Run every metric for a given ticker and print results. Test harness."""
+    print(f"\n{'='*50}")
+    print(f"  METRICS FOR {ticker}")
+    print(f"{'='*50}")
+
+    cik = get_cik_from_ticker(ticker)
+    facts = get_company_facts(cik)
+    print(f"Entity: {facts['entityName']}")
+
+    # Revenue growth
+    print("\n--- Revenue Growth ---")
+    try:
+        for v in calculate_growth(get_revenue(facts)):
+            tag = "(baseline)" if v["growth"] is None else f"({v['growth']:+.1%})"
+            print(f"  {v['year']}: ${v['value']:,}  {tag}")
+    except Exception as e:
+        print(f"  ERROR: {e}")
+
+    # Net income growth
+    print("\n--- Net Income Growth ---")
+    try:
+        for v in calculate_growth(get_net_income(facts)):
+            tag = "(baseline)" if v["growth"] is None else f"({v['growth']:+.1%})"
+            print(f"  {v['year']}: ${v['value']:,}  {tag}")
+    except Exception as e:
+        print(f"  ERROR: {e}")
+
+    # Net margin
+    print("\n--- Net Margin ---")
+    try:
+        for p in calculate_net_margin(facts):
+            print(f"  {p['year']}: {p['net_margin']:.1%}")
+    except Exception as e:
+        print(f"  ERROR: {e}")
+
+    # Debt-to-equity
+    print("\n--- Debt-to-Equity ---")
+    try:
+        for p in calculate_debt_to_equity(facts):
+            print(f"  {p['year']}: {p['ratio']:.2f}")
+    except Exception as e:
+        print(f"  ERROR: {e}")
+
+    # Current ratio
+    print("\n--- Current Ratio ---")
+    try:
+        for p in calculate_current_ratio(facts):
+            print(f"  {p['year']}: {p['ratio']:.2f}")
+    except Exception as e:
+        print(f"  ERROR: {e}")
+
+    # Debt-to-assets
+    print("\n--- Debt-to-Assets ---")
+    try:
+        for p in calculate_debt_to_assets(facts):
+            print(f"  {p['year']}: {p['ratio']:.2f}")
+    except Exception as e:
+        print(f"  ERROR: {e}")
+
+    # ROE
+    print("\n--- ROE ---")
+    try:
+        for p in calculate_roe(facts):
+            print(f"  {p['year']}: {p['ratio']:.1%}")
+    except Exception as e:
+        print(f"  ERROR: {e}")
+    
+run_all_metrics("WMT")
 
