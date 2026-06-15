@@ -162,7 +162,33 @@ def get_annual_values(facts, concept):
                 }
     result = sorted(annual_values.values(), key=lambda x: x["year"])
     return result
-        
+
+def calculate_growth(annual_values):
+    """
+    Calculate year-over-year growth rates for a list of annual values.
+
+    Args:
+    annual_values: List of dicts with 'year', 'date', and 'value' keys, sorted by year ascending.
+
+    Returns:
+    List of dicts with 'year', 'date', 'value', and 'growth' keys, where 'growth' is the YoY growth rate.
+    """
+    growth_data = []
+    previous_value = None
+    for entry in annual_values:
+        current_value = entry["value"]
+        growth = None
+        if previous_value is not None and previous_value != 0:
+            growth = (current_value - previous_value) / previous_value
+        growth_data.append({
+            "year": entry["year"],
+            "date": entry["date"],
+            "value": current_value,
+            "growth": growth
+        })
+        previous_value = current_value
+    return growth_data
+      
 
 
 if __name__ == "__main__":
@@ -196,3 +222,12 @@ if __name__ == "__main__":
     print(f"Annual Assets for AAPL:")
     for v in annual_assets:
         print(f"Year: {v['year']}, Date: {v['date']}, Value: {v['value']}")
+
+    growth_assets = calculate_growth(annual_assets)
+    print("\n=== GROWTH TEST START ===")
+    for v in growth_assets:
+        if v["growth"] is None:
+            print(f"  {v['year']}: ${v['value']:,}  (baseline)")
+        else:
+            print(f"  {v['year']}: ${v['value']:,}  ({v['growth']:+.1%})")
+    print("=== GROWTH TEST END ===")
