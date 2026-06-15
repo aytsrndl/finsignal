@@ -53,7 +53,7 @@ def get_recent_filings(cik, form_types = ("10-K", "10-Q"), limit=10):
     count: Number of recent filings to return (default: 10)
 
     Returns:
-    List of dictionaries with keys: 'form_type', 'filing_date', 'filing_url'
+    List of dictionaries with keys: 'form_type', 'filing_date', 'accession_number', 'primary_document'.
     """
     # SEC's EDGAR API endpoint for company filings
     EDGAR_API_URL = f"https://data.sec.gov/submissions/CIK{cik}.json"
@@ -225,6 +225,33 @@ def get_revenue(facts, min_year = 2021):
 
     raise KeyError(f"No revenue data found for any of the candidate tags: {REVENUE_TAGS}")
 
+def calculate_debt_to_equity(facts):
+    """
+    Calculate the Debt-to-Equity ratio for all years available.
+
+    Args:
+    facts: Dictionary containing company facts data (from get_company_facts)
+
+    Returns:
+    List of dicts with 'year' and 'ratio', sorted by year ascending.
+    """
+    liabilities = get_annual_values(facts, "Liabilities")
+    equity = get_annual_values(facts, "StockholdersEquity")
+
+    equity_by_year = {e["year"]: e["value"] for e in equity}
+    debt_to_equity = []
+    for l in liabilities:
+        year = l["year"]
+        if year not in equity_by_year:
+            continue
+        equity_value = equity_by_year[year]
+        if equity_value == 0:
+            continue
+        ratio = l["value"] / equity_value
+        debt_to_equity.append({"year": year, "ratio": ratio})
+
+    return sorted(debt_to_equity, key=lambda x: x["year"])
+
 
 if __name__ == "__main__":
     test_tickers = ["AAPL", "MSFT", "GOOGL"]
@@ -284,5 +311,10 @@ if __name__ == "__main__":
     for v in msft_growth:
         tag = "(baseline)" if v["growth"] is None else f"({v['growth']:+.1%})"
         print(f"  {v['year']}: ${v['value']:,}  {tag}")
+
+    de = calculate_debt_to_equity(facts)
+    print("\n=== APPLE DEBT-TO-EQUITY ===")
+    for point in de:
+        print(f"  {point['year']}: {point['ratio']:.2f}")
 
 
