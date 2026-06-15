@@ -11,6 +11,13 @@ USER_AGENT = "Aytunc Sarandal aytsrndl@gmail.com"
 # SEC's public ticker-to-CIK mapping file
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 
+#Example of revenue tags to check in order of priority
+REVENUE_TAGS = [
+    "RevenueFromContractWithCustomerExcludingAssessedTax",
+    "RevenueFromContractWithCustomerIncludingAssessedTax",
+    "Revenues",
+]
+
 def get_cik_from_ticker(ticker):
     """
     Fetch the 10-digit zero-padded CIK for a given ticker symbol
@@ -188,7 +195,35 @@ def calculate_growth(annual_values):
         })
         previous_value = current_value
     return growth_data
-      
+
+
+def get_revenue(facts, min_year = 2021):
+    """ 
+    Resolve a companies annual revenue using a priority list of XBRL tags. Restricted to recent years (default: 2021 and later).
+
+    Tries each tag in REVENUE_TAGS in order, returning the first one that has data for the requested years.
+
+    Args:
+    facts: Dictionary containing company facts data (from get_company_facts)
+    min_year: Minimum year to consider for revenue data (default: 2021)
+
+    Returns:
+    List of dicts with 'year', 'date', and 'value' keys, sorted by year ascending.
+
+    Raises:
+    KeyError:If none of the candidate tags are found.
+    """
+    for tag in REVENUE_TAGS:
+        try:
+            annual_values = get_annual_values(facts, tag)
+        except KeyError:
+            continue   # this tag isn't present; try the next one
+
+        filtered_values = [v for v in annual_values if int(v["year"]) >= min_year]
+        if filtered_values:
+           return filtered_values
+
+    raise KeyError(f"No revenue data found for any of the candidate tags: {REVENUE_TAGS}")
 
 
 if __name__ == "__main__":
@@ -231,3 +266,23 @@ if __name__ == "__main__":
         else:
             print(f"  {v['year']}: ${v['value']:,}  ({v['growth']:+.1%})")
     print("=== GROWTH TEST END ===")
+
+    # --- Check 8: Revenue resolver (Apple) ---
+    apple_revenue = get_revenue(facts)
+    print("\n=== APPLE REVENUE (2021+) ===")
+    apple_growth = calculate_growth(apple_revenue)
+    for v in apple_growth:
+        tag = "(baseline)" if v["growth"] is None else f"({v['growth']:+.1%})"
+        print(f"  {v['year']}: ${v['value']:,}  {tag}")
+
+    # --- Check 9: Same resolver on Microsoft (does it generalize?) ---
+    msft_cik = get_cik_from_ticker("MSFT")
+    msft_facts = get_company_facts(msft_cik)
+    msft_revenue = get_revenue(msft_facts)
+    print("\n=== MICROSOFT REVENUE (2021+) ===")
+    msft_growth = calculate_growth(msft_revenue)
+    for v in msft_growth:
+        tag = "(baseline)" if v["growth"] is None else f"({v['growth']:+.1%})"
+        print(f"  {v['year']}: ${v['value']:,}  {tag}")
+
+
