@@ -5,6 +5,7 @@ EDGAR Parser - tools for fetching and parsing EDGAR data
 import requests
 import json
 from bs4 import BeautifulSoup
+import re
 
 # SEC requires a header for request identification
 # Format: "Your Name your-email@domain.com"
@@ -500,6 +501,8 @@ def html_to_text(html):
     for element in soup(["script", "style"]):
         element.decompose()
     text = soup.get_text(separator=" ")
+    text = re.sub(r"http\S+", " ", text)
+    text = re.sub(r"\b\w+:\S+", " ", text)
     text = " ".join(text.split())
 
     return text
@@ -511,7 +514,3 @@ print(f"Raw HTML: {len(html):,} characters")
 text = html_to_text(html)
 print(f"Stripped text: {len(text):,} characters")
 print(f"\nFirst 500 chars of text:\n{text[:500]}")
-
-print()
-
-print(f"\nChars 50,000-50,800:\n{text[50000:50800]}")
