@@ -3,6 +3,8 @@ EDGAR Parser - tools for fetching and parsing EDGAR data
 """
 
 import requests
+import json
+from bs4 import BeautifulSoup
 
 # SEC requires a header for request identification
 # Format: "Your Name your-email@domain.com"
@@ -464,8 +466,52 @@ def build_sec_metrics(ticker):
         "roe":               safe(calculate_roe, "ratio", facts),
     }
 
-import json
+def get_latest_10k_html(cik):
+    """
+    Fetch the most recent 10-K filing for a given CIK and return the HTML content of the primary document.
 
-for ticker in ["AAPL", "MSFT", "GOOGL"]:
-    metrics = build_sec_metrics(ticker)
-    print(json.dumps(metrics, indent=2))
+    Args:
+        cik: 10-digit zero-padded CIK as a string (e.g., "0000320193")
+
+    Returns:
+        The raw HTML content of the most recent 10-K filing's primary document, or (None, None) if no 10-K filings are found.
+    """
+    filings = get_recent_filings(cik, form_types=("10-K",))
+    if not filings:
+        raise ValueError(f"No 10-K filings found for CIK {cik}")
+    latest = filings[0]
+    url = build_filing_url(cik, latest["accession_number"], latest["primary_document"])
+    response = requests.get(url, headers={"User-Agent": USER_AGENT})
+    response.raise_for_status()
+    return response.text
+
+def html_to_text(html):
+    """
+    Convert raw HTML content to clean text using BeautifulSoup.
+
+    Args:
+        html: Raw HTML string.
+
+    Returns:
+        Clean text extracted from the HTML.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    
+    for element in soup(["script", "style"]):
+        element.decompose()
+    text = soup.get_text(separator=" ")
+    text = " ".join(text.split())
+
+    return text
+
+
+html = get_latest_10k_html(get_cik_from_ticker("AAPL"))
+print(f"Raw HTML: {len(html):,} characters")
+
+text = html_to_text(html)
+print(f"Stripped text: {len(text):,} characters")
+print(f"\nFirst 500 chars of text:\n{text[:500]}")
+
+print()
+
+print(f"\nChars 50,000-50,800:\n{text[50000:50800]}")
