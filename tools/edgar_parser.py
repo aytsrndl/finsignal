@@ -408,162 +408,64 @@ def calculate_roe(facts):
     """Return on equity (net income / stockholders' equity) per year."""
     return calculate_ratio(facts, "NetIncomeLoss", "StockholdersEquity", min_year=2021)
 
-if __name__ == "__main__":
-    test_tickers = ["AAPL", "MSFT", "GOOGL"]
-    for t in test_tickers:
-        cik = get_cik_from_ticker(t)
-        print(f"{t} -> CIK: {cik}")
+def _latest(series, value_key):
+    """
+    Return the most recent {value, year} from a time series of annual data. 
+    or {value: None, year: None} if the series is empty.
+
+    Args:
+        series: List of dicts with 'year' and value_key.
+        value_key: The key in the dict to extract the value from.
+    """
+    if not series:
+        return {"value": None, "year": None}
+    latest = series[-1]
+    return {"value": latest[value_key], "year": latest["year"]}
+
+def build_sec_metrics(ticker):
+    """
+    Assemble all quanitative metrics for a given ticker into a single dictionary.
     
-    print()
+    Each metric reports it's most recent value along with the fiscal year that value is from.
+    Metrics that can't be computed are recorded as None.
 
-    apple_cik = get_cik_from_ticker("AAPL")
+    Args:
+        ticker: Stock ticker symbol (e.g., "AAPL")
 
-    filings = get_recent_filings(apple_cik)
-    print(f"Recent 10k/10Q filings for AAPL (CIK {apple_cik}):")
-    for f in filings:
-        url = build_filing_url(apple_cik, f["accession_number"], f["primary_document"])
-        print(f"{f['form_type']} filed on {f['filing_date']} - {url}")
-    
-    print()
-
-    facts = get_company_facts(apple_cik)
-    print(f"Entity: {facts['entityName']}")
-    print(f"Number of us-gaap concepts: {len(facts['facts']['us-gaap'])}")
-
-    assets_values = get_concept_values(facts, "Assets")
-    print(f"Assets time series for AAPL:")
-    for v in assets_values:
-        print(f"Date: {v['date']}, Value: {v['value']}")
-
-    annual_assets = get_annual_values(facts, "Assets")
-    print(f"Annual Assets for AAPL:")
-    for v in annual_assets:
-        print(f"Year: {v['year']}, Date: {v['date']}, Value: {v['value']}")
-
-    growth_assets = calculate_growth(annual_assets)
-    print("\n=== GROWTH TEST START ===")
-    for v in growth_assets:
-        if v["growth"] is None:
-            print(f"  {v['year']}: ${v['value']:,}  (baseline)")
-        else:
-            print(f"  {v['year']}: ${v['value']:,}  ({v['growth']:+.1%})")
-    print("=== GROWTH TEST END ===")
-
-    apple_revenue = get_revenue(facts)
-    print("\n=== APPLE REVENUE (2021+) ===")
-    apple_growth = calculate_growth(apple_revenue)
-    for v in apple_growth:
-        tag = "(baseline)" if v["growth"] is None else f"({v['growth']:+.1%})"
-        print(f"  {v['year']}: ${v['value']:,}  {tag}")
-
-    msft_cik = get_cik_from_ticker("MSFT")
-    msft_facts = get_company_facts(msft_cik)
-    msft_revenue = get_revenue(msft_facts)
-    print("\n=== MICROSOFT REVENUE (2021+) ===")
-    msft_growth = calculate_growth(msft_revenue)
-    for v in msft_growth:
-        tag = "(baseline)" if v["growth"] is None else f"({v['growth']:+.1%})"
-        print(f"  {v['year']}: ${v['value']:,}  {tag}")
-
-    de = calculate_debt_to_equity(facts)
-    print("\n=== APPLE DEBT-TO-EQUITY ===")
-    for point in de:
-        print(f"  {point['year']}: {point['ratio']:.2f}")
-
-    cr = calculate_current_ratio(facts)
-    print("\n=== APPLE CURRENT RATIO ===")
-    for p in cr:
-        print(f"  {p['year']}: {p['ratio']:.2f}")
-
-    da = calculate_debt_to_assets(facts)
-    print("\n=== APPLE DEBT-TO-ASSETS ===")
-    for p in da:
-        print(f"  {p['year']}: {p['ratio']:.2f}")
-
-    roe = calculate_roe(facts)
-    print("\n=== APPLE ROE ===")
-    for p in roe:
-        print(f"  {p['year']}: {p['ratio']:.1%}")
-
-    apple_ni = get_net_income(facts)
-    ni_growth = calculate_growth(apple_ni)
-    print("\n=== APPLE NET INCOME GROWTH ===")
-    for v in ni_growth:
-        tag = "(baseline)" if v["growth"] is None else f"({v['growth']:+.1%})"
-        print(f"  {v['year']}: ${v['value']:,}  {tag}")
-
-    nm = calculate_net_margin(facts)
-    print("\n=== APPLE NET MARGIN ===")
-    for p in nm:
-        print(f"  {p['year']}: {p['net_margin']:.1%}")
-
-def run_all_metrics(ticker):
-    """Run every metric for a given ticker and print results. Test harness."""
-    print(f"\n{'='*50}")
-    print(f"  METRICS FOR {ticker}")
-    print(f"{'='*50}")
-
+    Returns:
+        Dictionary of metrics with keys:
+            - revenue
+            - net_income
+            - net_margin
+            - debt_to_equity
+            - current_ratio
+            - debt_to_assets
+            - roe
+    """
     cik = get_cik_from_ticker(ticker)
     facts = get_company_facts(cik)
-    print(f"Entity: {facts['entityName']}")
 
-    # Revenue growth
-    print("\n--- Revenue Growth ---")
-    try:
-        for v in calculate_growth(get_revenue(facts)):
-            tag = "(baseline)" if v["growth"] is None else f"({v['growth']:+.1%})"
-            print(f"  {v['year']}: ${v['value']:,}  {tag}")
-    except Exception as e:
-        print(f"  ERROR: {e}")
-
-    # Net income growth
-    print("\n--- Net Income Growth ---")
-    try:
-        for v in calculate_growth(get_net_income(facts)):
-            tag = "(baseline)" if v["growth"] is None else f"({v['growth']:+.1%})"
-            print(f"  {v['year']}: ${v['value']:,}  {tag}")
-    except Exception as e:
-        print(f"  ERROR: {e}")
-
-    # Net margin
-    print("\n--- Net Margin ---")
-    try:
-        for p in calculate_net_margin(facts):
-            print(f"  {p['year']}: {p['net_margin']:.1%}")
-    except Exception as e:
-        print(f"  ERROR: {e}")
-
-    # Debt-to-equity
-    print("\n--- Debt-to-Equity ---")
-    try:
-        for p in calculate_debt_to_equity(facts):
-            print(f"  {p['year']}: {p['ratio']:.2f}")
-    except Exception as e:
-        print(f"  ERROR: {e}")
-
-    # Current ratio
-    print("\n--- Current Ratio ---")
-    try:
-        for p in calculate_current_ratio(facts):
-            print(f"  {p['year']}: {p['ratio']:.2f}")
-    except Exception as e:
-        print(f"  ERROR: {e}")
-
-    # Debt-to-assets
-    print("\n--- Debt-to-Assets ---")
-    try:
-        for p in calculate_debt_to_assets(facts):
-            print(f"  {p['year']}: {p['ratio']:.2f}")
-    except Exception as e:
-        print(f"  ERROR: {e}")
-
-    # ROE
-    print("\n--- ROE ---")
-    try:
-        for p in calculate_roe(facts):
-            print(f"  {p['year']}: {p['ratio']:.1%}")
-    except Exception as e:
-        print(f"  ERROR: {e}")
+    def safe(fn, value_key, *args):
+        """Run a metric function, return latest {value, year}, or None on failure."""
+        try:
+            return _latest(fn(*args), value_key)
+        except Exception:
+            return {"value": None, "year": None}
     
-run_all_metrics("WMT")
+    return {
+        "ticker": ticker,
+        "entity_name": facts.get("entityName"),
+        "revenue_growth":    safe(lambda f: calculate_growth(get_revenue(f)), "growth", facts),
+        "net_income_growth": safe(lambda f: calculate_growth(get_net_income(f)), "growth", facts),
+        "net_margin":        safe(calculate_net_margin, "net_margin", facts),
+        "debt_to_equity":    safe(calculate_debt_to_equity, "ratio", facts),
+        "debt_to_assets":    safe(calculate_debt_to_assets, "ratio", facts),
+        "current_ratio":     safe(calculate_current_ratio, "ratio", facts),
+        "roe":               safe(calculate_roe, "ratio", facts),
+    }
 
+import json
+
+for ticker in ["AAPL", "MSFT", "GOOGL"]:
+    metrics = build_sec_metrics(ticker)
+    print(json.dumps(metrics, indent=2))
