@@ -508,7 +508,7 @@ def html_to_text(html):
     return text
 
 
-html = get_latest_10k_html(get_cik_from_ticker("AAPL"))
+html = get_latest_10k_html(get_cik_from_ticker("WMT"))
 print(f"Raw HTML: {len(html):,} characters")
 
 text = html_to_text(html)
