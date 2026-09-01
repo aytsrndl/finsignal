@@ -6,6 +6,8 @@ import requests
 import json
 from bs4 import BeautifulSoup
 import re
+from openai import OpenAI
+from pydantic import BaseModel, Field
 
 # SEC requires a header for request identification
 # Format: "Your Name your-email@domain.com"
@@ -514,3 +516,5 @@ print(f"Raw HTML: {len(html):,} characters")
 text = html_to_text(html)
 print(f"Stripped text: {len(text):,} characters")
 print(f"\nFirst 500 chars of text:\n{text[:500]}")
+
+
