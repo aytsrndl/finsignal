@@ -137,6 +137,3 @@ Planned additions: the remaining four agents, an orchestrator, a SQLite portfoli
 
 FinSignal is an educational project. Nothing it outputs is investment advice.
 
-## Author
-
-Aytunc Sarandal
