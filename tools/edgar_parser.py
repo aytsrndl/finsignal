@@ -3,15 +3,28 @@ EDGAR Parser - tools for fetching and parsing EDGAR data
 """
 
 import requests
-import json
+import os
+from pathlib import Path
 from bs4 import BeautifulSoup
 import re
-from openai import OpenAI
-from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
 # SEC requires a header for request identification
 # Format: "Your Name your-email@domain.com"
-USER_AGENT = "Aytunc Sarandal aytsrndl@gmail.com"
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+REQUEST_TIMEOUT = 30
+
+
+def _get(url):
+    """Fetch SEC data with explicit requester identification and a timeout."""
+    user_agent = os.environ.get("SEC_USER_AGENT", "").strip()
+    if not user_agent:
+        raise ValueError("Set SEC_USER_AGENT to your name and contact email before requesting SEC data.")
+    response = requests.get(
+        url, headers={"User-Agent": user_agent}, timeout=REQUEST_TIMEOUT
+    )
+    response.raise_for_status()
+    return response
 
 # SEC's public ticker-to-CIK mapping file
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -42,8 +55,7 @@ def get_cik_from_ticker(ticker):
     Raises:
     ValueError: If the ticker is not found in the SEC mapping.
     """
-    response = requests.get(TICKERS_URL, headers={"User-Agent": USER_AGENT})
-    response.raise_for_status()
+    response = _get(TICKERS_URL)
     tickers_data = response.json()
 
     # The data is a dict of dicts, keyed by index, each with 'ticker' and 'cik_str'
@@ -68,8 +80,7 @@ def get_recent_filings(cik, form_types = ("10-K", "10-Q"), limit=10):
     # SEC's EDGAR API endpoint for company filings
     EDGAR_API_URL = f"https://data.sec.gov/submissions/CIK{cik}.json"
 
-    response = requests.get(EDGAR_API_URL, headers={"User-Agent": USER_AGENT})
-    response.raise_for_status()
+    response = _get(EDGAR_API_URL)
     data = response.json()
 
 
@@ -117,8 +128,7 @@ def get_company_facts(cik):
     Dictionary containing company facts data.
     """
     FACTS_API_URL = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
-    response = requests.get(FACTS_API_URL, headers = {"User-Agent": USER_AGENT})
-    response.raise_for_status()
+    response = _get(FACTS_API_URL)
     data = response.json()
     return data
 
@@ -484,8 +494,7 @@ def get_latest_10k_html(cik):
         raise ValueError(f"No 10-K filings found for CIK {cik}")
     latest = filings[0]
     url = build_filing_url(cik, latest["accession_number"], latest["primary_document"])
-    response = requests.get(url, headers={"User-Agent": USER_AGENT})
-    response.raise_for_status()
+    response = _get(url)
     return response.text
 
 def html_to_text(html):
@@ -510,11 +519,11 @@ def html_to_text(html):
     return text
 
 
-html = get_latest_10k_html(get_cik_from_ticker("WMT"))
-print(f"Raw HTML: {len(html):,} characters")
-
-text = html_to_text(html)
-print(f"Stripped text: {len(text):,} characters")
-print(f"\nFirst 500 chars of text:\n{text[:500]}")
+if __name__ == "__main__":
+    html = get_latest_10k_html(get_cik_from_ticker("WMT"))
+    print(f"Raw HTML: {len(html):,} characters")
+    text = html_to_text(html)
+    print(f"Stripped text: {len(text):,} characters")
+    print(f"\nFirst 500 chars of text:\n{text[:500]}")
 
 

@@ -1,0 +1,11 @@
+{
+  "entityName": "Fixture Company",
+  "facts": {"us-gaap": {
+    "Revenues": {"units": {"USD": [{"end":"2024-12-31","val":100,"fp":"FY","form":"10-K"},{"end":"2025-12-31","val":120,"fp":"FY","form":"10-K"}]}},
+    "NetIncomeLoss": {"units": {"USD": [{"end":"2024-12-31","val":10,"fp":"FY","form":"10-K"},{"end":"2025-12-31","val":18,"fp":"FY","form":"10-K"}]}},
+    "Assets": {"units": {"USD": [{"end":"2025-12-31","val":240,"fp":"FY","form":"10-K"}]}},
+    "StockholdersEquity": {"units": {"USD": [{"end":"2025-12-31","val":120,"fp":"FY","form":"10-K"}]}},
+    "AssetsCurrent": {"units": {"USD": [{"end":"2025-12-31","val":100,"fp":"FY","form":"10-K"}]}},
+    "LiabilitiesCurrent": {"units": {"USD": [{"end":"2025-12-31","val":50,"fp":"FY","form":"10-K"}]}}
+  }}
+}

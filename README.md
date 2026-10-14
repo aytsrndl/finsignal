@@ -78,9 +78,15 @@ python -m venv venv
 python -m pip install -r requirements.txt
 ```
 
-**SEC User-Agent (required).** The SEC requires requests to identify the requester. Edit `USER_AGENT` in `tools/edgar_parser.py` to your own name and email.
+**SEC User-Agent (required for live requests).** The SEC requires requests to identify the requester. Set `SEC_USER_AGENT` in your environment or in a gitignored `.env` file in the project root:
 
-**LLM API key.** Create a `.env` file in the project root (it is gitignored) containing your provider key, for example:
+```dotenv
+SEC_USER_AGENT="Your Name your-email@example.com"
+```
+
+The parser can be imported without making network requests. Live requests fail with a configuration error if `SEC_USER_AGENT` is missing and use a 30-second timeout.
+
+**LLM API key (for future LLM calls).** The current qualitative layer defines schemas but does not yet call a provider. When implementing it, add your provider key to the gitignored `.env` file, for example:
 
 ```
 OPENAI_API_KEY=your-key-here
@@ -112,7 +118,23 @@ finsignal/
 └── requirements.txt
 ```
 
-Planned additions: the remaining four agents, an orchestrator, a SQLite portfolio store, a Streamlit frontend, and automated tests.
+Planned additions: the remaining four agents, an orchestrator, a SQLite portfolio store, and a Streamlit frontend.
+
+## Tests
+
+Run the offline suite from the repository root with your virtual environment active:
+
+```sh
+python -m unittest discover -s tests -v
+```
+
+The suite uses synthetic company-facts fixtures and mocked HTTP responses. It covers the seven metrics, annual-series handling, tag fallbacks, missing values, zero denominators, request configuration, filing retrieval, HTML extraction, and qualitative schemas. It requires no SEC access or API credentials. Live SEC access remains a separate integration check.
+
+To run the Walmart filing demo with SEC access configured:
+
+```sh
+python -m tools.edgar_parser
+```
 
 ## Known limitations
 
@@ -121,7 +143,7 @@ Planned additions: the remaining four agents, an orchestrator, a SQLite portfoli
 - ROE uses year-end equity rather than average equity.
 - Extracted 10-K text still contains some harmless XBRL header noise.
 - Validated on a handful of large US companies. Banks and other unusual balance sheets are untested.
-- Manual sanity checks only. Automated tests are planned.
+- Offline automated tests use synthetic data; broad validation against live filings remains limited.
 - In production, the parsing layer would likely be replaced by a commercial data vendor. It was built here to understand the problem directly.
 
 ## Roadmap
