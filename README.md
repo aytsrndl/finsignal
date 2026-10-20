@@ -2,7 +2,7 @@
 
 A hybrid multi-agent system for stock analysis. Specialized code and ML models handle the numbers; LLMs handle interpretation and synthesis.
 
-> **Status: in active development.** The SEC Filing Agent has a metrics-to-LLM pipeline with offline tests. Live LLM validation is pending. The other four agents are planned. See [Status](#status).
+> **Status: in active development.** The SEC Filing Agent has a metrics-to-LLM pipeline with offline tests. Live LLM validation is pending. The Technical Agent computes daily signals; Sentiment, Risk, and Portfolio Manager agents are planned. See [Status](#status).
 
 ## Core idea
 
@@ -16,7 +16,7 @@ Five agents. Four specialists feed structured JSON into a Portfolio Manager that
 |---|---|---|---|---|
 | **SEC Filing** | What is the company, fundamentally? | Python (EDGAR / XBRL) | Risk analysis from 10-K text | Pipeline implemented; live LLM validation pending |
 | **Sentiment** | What is the market feeling? | FinBERT | Summarize mood, flag divergences | Planned |
-| **Technical** | What is price action saying? | pandas / ta | Interpret signal convergence | Planned |
+| **Technical** | What is price action saying? | Python / yfinance | Optional future interpretation | Deterministic indicators and JSON CLI implemented; cloud live fetch blocked |
 | **Risk Manager** | How much could this hurt the portfolio? | NumPy (VaR, correlation) | Write risk memo | Planned |
 | **Portfolio Manager** | What do we do? | none | Pure LLM synthesis | Planned |
 
@@ -27,7 +27,7 @@ Agents communicate through structured JSON rather than natural language, which k
 **SEC Filing Agent, quantitative layer (done):**
 - Ticker to CIK lookup, filing list, and filing URL construction against SEC EDGAR
 - Company Facts (XBRL) extraction, cleaned into deduplicated annual series
-- Seven metrics: revenue growth, net income growth, net margin, debt-to-equity, debt-to-assets, current ratio, ROE
+- Seven metrics: revenue growth, net income growth, net margin, liabilities-to-equity, liabilities-to-assets, current ratio, ROE
 - Tag-robust resolvers for revenue and net income, and total liabilities derived from the accounting identity (`Assets - Equity`) instead of a tag lookup
 - Structured JSON output via `build_sec_metrics(ticker)`
 - Validated on AAPL, MSFT, WMT, and GOOGL
@@ -50,8 +50,8 @@ Agents communicate through structured JSON rather than natural language, which k
   "revenue_growth":    {"value": 0.064, "year": "2025"},
   "net_income_growth": {"value": 0.195, "year": "2025"},
   "net_margin":        {"value": 0.269, "year": "2025"},
-  "debt_to_equity":    {"value": 3.87,  "year": "2025"},
-  "debt_to_assets":    {"value": 0.79,  "year": "2025"},
+  "liabilities_to_equity":    {"value": 3.87,  "year": "2025"},
+  "liabilities_to_assets":    {"value": 0.79,  "year": "2025"},
   "current_ratio":     {"value": 0.89,  "year": "2025"},
   "roe":               {"value": 1.52,  "year": "2025"}
 }
@@ -152,7 +152,7 @@ python -m tools.edgar_parser
 ## Roadmap
 
 1. Validate the SEC Filing Agent against live SEC data and OpenAI responses
-2. Technical Agent (yfinance and indicators)
+2. Validate Technical Agent live data access; indicators and offline CLI implemented
 3. Sentiment Agent (FinBERT)
 4. Risk Manager Agent
 5. Portfolio Manager Agent and orchestration
@@ -210,3 +210,85 @@ passages and validation failures. This retry incurs additional provider usage.
 Every citation is rechecked; a successful correction is noted in report warnings.
 Provider/network errors and unresolved unknown IDs fail the report. No investment
 decision is produced by this agent.
+
+## Technical Agent
+
+Install the updated dependencies in your active Python 3.12 virtual environment:
+
+```sh
+python -m pip install -r requirements.txt
+python -m agents.technical_agent AAPL
+```
+
+No LLM or API key is required. The initial interpretation is generated from
+calculated signals; LLM commentary can be added later without changing the math.
+The CLI writes JSON to stdout or an error to stderr with exit status 1.
+
+The shared price adapter requests two years of daily OHLCV from Yahoo Finance
+through `yfinance`. Symbols such as `BRK.B` map to Yahoo's `BRK-B` while reports
+retain the input symbol. Network access may require `query1.finance.yahoo.com`,
+`query2.finance.yahoo.com`, and `fc.yahoo.com`; follow any provider redirects
+when diagnosing your environment's policy. The cloud live check failed with a
+proxy CONNECT 403, so live price retrieval has not been verified here.
+
+Reports include source, currency, retrieval time, latest bar date, history length,
+raw and adjusted latest close, warnings, and the following indicators:
+
+| Indicator | Convention |
+|---|---|
+| RSI(14) | Wilder smoothing; needs 15 closes; flat=50, gains only=100, losses only=0 |
+| SMA(50), SMA(200) | Arithmetic average of adjusted closes |
+| MACD(12,26,9) | SMA-seeded EMAs; signal and histogram available after 34 closes |
+| Relative volume | Latest volume divided by the preceding 20 sessions' average, excluding the latest session |
+| Trailing range | Minimum adjusted low and maximum adjusted high over 20 sessions |
+
+Price indicators use split- and dividend-adjusted closes. Daily highs/lows are
+scaled by that day's adjusted-close/close ratio for the trailing range. These
+levels are on the adjusted basis, not necessarily historical executable prices.
+Volume uses provider-reported units. The current exchange-local date is always
+excluded, even after market close, to avoid partial-session contamination. It
+becomes eligible on the following day. Missing, nonfinite, duplicate, unsorted,
+or inconsistent OHLCV inputs fail validation rather than being filled silently.
+Short histories produce null indicators and explicit warnings. Dates more than
+seven calendar days old are flagged as potentially stale. There is no exchange
+calendar reconciliation, persistent analysis cache, or cross-provider verification.
+
+Moving-average and MACD crosses describe events between the previous and latest
+bars. Being above a moving average alone is not reported as a new crossover.
+Trend is up only when adjusted price is above both averages and SMA50 is above
+SMA200; the reverse is a downtrend, other complete cases are mixed. RSI thresholds
+are 70/30. These rules describe historical data and do not issue BUY/HOLD/SELL
+recommendations or calibrated forecasts. Trailing extremes are not proven
+support/resistance levels.
+
+For offline development, use the synthetic, steadily rising fixture:
+
+```sh
+python -m agents.technical_agent TEST --prices-csv tests/fixtures/prices.csv --currency USD
+python -m unittest discover -s tests -v
+```
+
+CSV input requires `date,open,high,low,close,adjusted_close,volume`, in ascending
+unique date order. Adjustments, symbol identity, and session completeness of a CSV
+are the caller's responsibility. The fixture is synthetic and intentionally old,
+so a stale-data warning is expected.
+
+The price history can be fetched once and shared with future agents:
+
+```python
+from tools.price_data import fetch_price_history
+from agents.technical_agent import analyze_technical
+
+history = fetch_price_history("AAPL")
+technical_report = analyze_technical("AAPL", history=history)
+# A future risk agent can consume the same history without downloading it again.
+```
+
+### SEC ratio naming correction
+
+The SEC output keys and Pydantic fields formerly named `debt_to_equity` and
+`debt_to_assets` are now `liabilities_to_equity` and `liabilities_to_assets`.
+The corresponding parser functions are now `calculate_liabilities_to_equity`
+and `calculate_liabilities_to_assets`. Calculations are unchanged: the numerator
+is total liabilities (assets minus equity), not interest-bearing debt. This is an
+intentional breaking schema correction; update consumers of the old names.

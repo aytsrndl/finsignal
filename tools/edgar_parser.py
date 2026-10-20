@@ -394,9 +394,9 @@ def _ratio_from_series(numerator_series, denominator_series, min_year=None):
 
     return sorted(ratios, key=lambda x: x["year"])
 
-def calculate_debt_to_equity(facts):
+def calculate_liabilities_to_equity(facts):
     """
-    Calculate the Debt-to-Equity ratio for all years available.
+    Calculate the Liabilities-to-Equity ratio for all years available.
 
     """
     liabilities = get_total_liabilities(facts)
@@ -410,9 +410,9 @@ def calculate_current_ratio(facts):
     """
     return calculate_ratio(facts, "AssetsCurrent", "LiabilitiesCurrent")
 
-def calculate_debt_to_assets(facts):
+def calculate_liabilities_to_assets(facts):
     """
-    Calculate the Debt-to-Assets (total liabilities / total assets) ratio for all years available.
+    Calculate the Liabilities-to-Assets (total liabilities / total assets) ratio for all years available.
 
     """
     liabilities = get_total_liabilities(facts)
@@ -452,9 +452,9 @@ def build_sec_metrics(ticker):
             - revenue
             - net_income
             - net_margin
-            - debt_to_equity
+            - liabilities_to_equity
             - current_ratio
-            - debt_to_assets
+            - liabilities_to_assets
             - roe
     """
     cik = get_cik_from_ticker(ticker)
@@ -478,8 +478,8 @@ def metrics_from_facts(ticker, facts):
         "revenue_growth":    safe(lambda f: calculate_growth(get_revenue(f)), "growth", facts),
         "net_income_growth": safe(lambda f: calculate_growth(get_net_income(f)), "growth", facts),
         "net_margin":        safe(calculate_net_margin, "net_margin", facts),
-        "debt_to_equity":    safe(calculate_debt_to_equity, "ratio", facts),
-        "debt_to_assets":    safe(calculate_debt_to_assets, "ratio", facts),
+        "liabilities_to_equity":    safe(calculate_liabilities_to_equity, "ratio", facts),
+        "liabilities_to_assets":    safe(calculate_liabilities_to_assets, "ratio", facts),
         "current_ratio":     safe(calculate_current_ratio, "ratio", facts),
         "roe":               safe(calculate_roe, "ratio", facts),
     }

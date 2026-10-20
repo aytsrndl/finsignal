@@ -47,8 +47,8 @@ class SECMetrics(BaseModel):
     revenue_growth: Metric
     net_income_growth: Metric
     net_margin: Metric
-    debt_to_equity: Metric
-    debt_to_assets: Metric
+    liabilities_to_equity: Metric
+    liabilities_to_assets: Metric
     current_ratio: Metric
     roe: Metric
 

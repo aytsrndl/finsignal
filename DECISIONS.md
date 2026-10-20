@@ -9,6 +9,22 @@ was rejected. Newest entries at the top.
 
 ---
 
+## Technical Agent — first version
+
+Use a shared validated `PriceHistory` as the boundary between price retrieval,
+technical calculations, and the future risk agent. Use adjusted prices, explicit
+indicator warm-up periods, and deterministic signals so offline tests do not need
+an LLM. Keep current-day bars out of the workflow and label missing data rather
+than filling it. A signal-line relationship and a crossover event are distinct.
+Use plain Python indicator calculations with documented SMA-seeded EMA and Wilder
+RSI conventions instead of introducing a compiled indicator library.
+
+The SEC's leverage ratio labels now say liabilities rather than debt, matching
+the actual numerator. Existing calculations are preserved; the schema change is
+intentional so downstream agents do not confuse total liabilities with debt.
+
+---
+
 ## SEC Filing Agent — Qualitative Layer (planned)
 
 ### Use prompt-steering with full text, not code-based section parsing

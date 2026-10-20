@@ -49,7 +49,9 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(get.call_count, 2)
         self.assertIn('CIK0000000123.json', get.call_args.args[0])
         self.assertEqual(result['entity_name'], 'Fixture Company')
-        expected = {'revenue_growth': .2, 'net_income_growth': .8, 'net_margin': .15, 'debt_to_equity': 1., 'debt_to_assets': .5, 'current_ratio': 2., 'roe': .15}
+        self.assertNotIn('debt_to_equity', result)
+        self.assertNotIn('debt_to_assets', result)
+        expected = {'revenue_growth': .2, 'net_income_growth': .8, 'net_margin': .15, 'liabilities_to_equity': 1., 'liabilities_to_assets': .5, 'current_ratio': 2., 'roe': .15}
         for key, value in expected.items():
             with self.subTest(metric=key):
                 self.assertAlmostEqual(result[key]['value'], value)
