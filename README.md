@@ -2,7 +2,7 @@
 
 A hybrid multi-agent system for stock analysis. Specialized code and ML models handle the numbers; LLMs handle interpretation and synthesis.
 
-> **Status: in active development.** The SEC Filing Agent's quantitative layer is complete and validated. Its LLM layer is in progress. The other four agents are planned. See [Status](#status).
+> **Status: in active development.** The SEC Filing Agent has a metrics-to-LLM pipeline with offline tests. Live LLM validation is pending. The other four agents are planned. See [Status](#status).
 
 ## Core idea
 
@@ -14,7 +14,7 @@ Five agents. Four specialists feed structured JSON into a Portfolio Manager that
 
 | Agent | Question it answers | Compute engine | LLM role | Status |
 |---|---|---|---|---|
-| **SEC Filing** | What is the company, fundamentally? | Python (EDGAR / XBRL) | Risk analysis from 10-K text | Quant layer done, LLM layer in progress |
+| **SEC Filing** | What is the company, fundamentally? | Python (EDGAR / XBRL) | Risk analysis from 10-K text | Pipeline implemented; live LLM validation pending |
 | **Sentiment** | What is the market feeling? | FinBERT | Summarize mood, flag divergences | Planned |
 | **Technical** | What is price action saying? | pandas / ta | Interpret signal convergence | Planned |
 | **Risk Manager** | How much could this hurt the portfolio? | NumPy (VaR, correlation) | Write risk memo | Planned |
@@ -32,10 +32,12 @@ Agents communicate through structured JSON rather than natural language, which k
 - Structured JSON output via `build_sec_metrics(ticker)`
 - Validated on AAPL, MSFT, WMT, and GOOGL
 
-**SEC Filing Agent, qualitative layer (in progress):**
+**SEC Filing Agent, qualitative layer (implemented, live LLM validation pending):**
 - 10-K fetching and HTML-to-text extraction (done, validated on AAPL and WMT)
-- Pydantic schema for structured LLM output (scaffolded in `agents/sec_filing_agent.py`)
-- LLM analysis call (next)
+- Structured OpenAI analysis using the `TenKAnalysis` Pydantic schema
+- Filing source metadata, per-metric fiscal years, and explicit missing-data warnings
+- Evidence-quote checks and failure handling for incomplete/refused responses
+- Callable agent and JSON CLI, covered with mocked provider responses
 
 ## Example output
 
@@ -86,10 +88,11 @@ SEC_USER_AGENT="Your Name your-email@example.com"
 
 The parser can be imported without making network requests. Live requests fail with a configuration error if `SEC_USER_AGENT` is missing and use a 30-second timeout.
 
-**LLM API key (for future LLM calls).** The current qualitative layer defines schemas but does not yet call a provider. When implementing it, add your provider key to the gitignored `.env` file, for example:
+**LLM API key (required for qualitative analysis).** Add your OpenAI key to the gitignored `.env` file, for example:
 
 ```
 OPENAI_API_KEY=your-key-here
+FINSIGNAL_LLM_MODEL=gpt-4.1-mini
 ```
 
 Never commit this file.
@@ -111,7 +114,7 @@ text = html_to_text(get_latest_10k_html(get_cik_from_ticker("AAPL")))
 ```
 finsignal/
 ├── agents/
-│   └── sec_filing_agent.py   # LLM analysis layer (in progress)
+│   └── sec_filing_agent.py   # SEC report pipeline and JSON CLI
 ├── tools/
 │   └── edgar_parser.py       # EDGAR retrieval, metrics, 10-K text extraction
 ├── DECISIONS.md              # Design-decision log with reasoning
@@ -148,7 +151,7 @@ python -m tools.edgar_parser
 
 ## Roadmap
 
-1. Finish the SEC Filing Agent's LLM analysis and package it behind a single ticker-in, JSON-out interface
+1. Validate the SEC Filing Agent against live SEC data and OpenAI responses
 2. Technical Agent (yfinance and indicators)
 3. Sentiment Agent (FinBERT)
 4. Risk Manager Agent
@@ -159,3 +162,42 @@ python -m tools.edgar_parser
 
 FinSignal is an educational project. Nothing it outputs is investment advice.
 
+
+## SEC analysis CLI
+
+With `SEC_USER_AGENT` and `OPENAI_API_KEY` configured, run from the repository root:
+
+```sh
+python -m agents.sec_filing_agent AAPL
+# Optional model override:
+python -m agents.sec_filing_agent AAPL --model gpt-4.1-mini
+```
+
+The CLI writes a JSON report to stdout, or a short error to stderr with a nonzero
+exit status. Requests use the configured model (`FINSIGNAL_LLM_MODEL`, default
+`gpt-4.1-mini`); your account must have access to a model supporting Responses API
+structured outputs. Live runs incur provider usage charges. No API key is needed
+for the offline suite.
+
+You can also call the agent directly:
+
+```python
+from agents.sec_filing_agent import analyze_sec_filing
+
+report = analyze_sec_filing("AAPL")
+print(report.model_dump_json(indent=2))
+```
+
+Reports include seven metrics, their fiscal years, the latest 10-K's date and URL,
+a retrieval timestamp, qualitative analysis, model name, and warnings. Company
+Facts can contain data newer than the selected annual filing; this is not a
+historical point-in-time analysis. Missing metrics remain null.
+
+The full extracted filing goes to the model, with no silent truncation. Filings
+above 800,000 characters are rejected before an LLM call; Python callers can
+explicitly adjust `max_filing_chars` for their selected model. This character
+limit is only a size guard, not a token-count or context-window guarantee.
+Finding evidence must match the extracted filing after whitespace normalization;
+this checks quotation presence, not whether the interpretation is correct.
+Provider/network errors and unsupported evidence fail the report instead of
+returning an invented analysis. No investment decision is produced by this agent.

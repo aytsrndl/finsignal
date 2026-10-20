@@ -459,6 +459,11 @@ def build_sec_metrics(ticker):
     """
     cik = get_cik_from_ticker(ticker)
     facts = get_company_facts(cik)
+    return metrics_from_facts(ticker, facts)
+
+
+def metrics_from_facts(ticker, facts):
+    """Compute the seven metrics from already fetched Company Facts data."""
 
     def safe(fn, value_key, *args):
         """Run a metric function, return latest {value, year}, or None on failure."""
@@ -494,8 +499,12 @@ def get_latest_10k_html(cik):
         raise ValueError(f"No 10-K filings found for CIK {cik}")
     latest = filings[0]
     url = build_filing_url(cik, latest["accession_number"], latest["primary_document"])
-    response = _get(url)
-    return response.text
+    return get_filing_html(url)
+
+
+def get_filing_html(url):
+    """Fetch a filing document using the same SEC request configuration."""
+    return _get(url).text
 
 def html_to_text(html):
     """
