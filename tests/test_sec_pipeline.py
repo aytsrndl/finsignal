@@ -62,8 +62,48 @@ class SECPipelineTests(unittest.TestCase):
 
     def test_fabricated_evidence_rejected(self):
         self.analysis.major_risks[0].evidence = 'Invented quotation'
-        with self.assertRaises(AnalysisError):
+        with self.assertRaisesRegex(AnalysisError, 'after one corrective retry'):
             analyze_sec_filing('TEST', llm=self.llm)
+        self.assertEqual(self.llm.analyze.call_count, 2)
+
+    def test_evidence_can_be_corrected_once(self):
+        invalid = self.analysis.model_copy(deep=True)
+        invalid.major_risks[0].evidence = 'A paraphrase, not a quote.'
+        self.llm.analyze.side_effect = [invalid, self.analysis]
+        report = analyze_sec_filing('TEST', llm=self.llm)
+        self.assertEqual(report.analysis, self.analysis)
+        self.assertIn('Evidence validation required one corrective LLM retry.', report.warnings)
+        repair = json.loads(self.llm.analyze.call_args.kwargs['payload'])
+        self.assertEqual(repair['validation_feedback']['unsupported_fields'], ['major_risks[0].evidence'])
+        self.assertEqual(repair['filing_text'], 'We depend on a single supplier.')
+
+    def test_valid_evidence_needs_no_retry(self):
+        analyze_sec_filing('TEST', llm=self.llm)
+        self.llm.analyze.assert_called_once()
+
+    def test_retry_checks_all_finding_categories(self):
+        invalid = self.analysis.model_copy(deep=True)
+        invalid.major_risks[0].evidence = 'Invented quote'
+        corrected = self.analysis.model_copy(deep=True)
+        corrected.red_flags = [invalid.major_risks[0]]
+        self.llm.analyze.side_effect = [invalid, corrected]
+        with self.assertRaisesRegex(AnalysisError, r'red_flags\[0\]'):
+            analyze_sec_filing('TEST', llm=self.llm)
+        self.assertEqual(self.llm.analyze.call_count, 2)
+
+    def test_unsupported_finding_can_be_removed(self):
+        invalid = self.analysis.model_copy(deep=True)
+        invalid.major_risks[0].evidence = ''
+        corrected = self.analysis.model_copy(deep=True)
+        corrected.major_risks = []
+        self.llm.analyze.side_effect = [invalid, corrected]
+        self.assertEqual(analyze_sec_filing('TEST', llm=self.llm).analysis.major_risks, [])
+
+    def test_cli_shows_evidence_error(self):
+        from io import StringIO
+        with patch('sys.argv', ['sec-agent', 'TEST']), patch('agents.sec_filing_agent.analyze_sec_filing', side_effect=AnalysisError('Evidence still does not match.')), patch('sys.stderr', new_callable=StringIO) as stderr:
+            self.assertEqual(main(), 1)
+            self.assertIn('Evidence still does not match.', stderr.getvalue())
 
     def test_provider_failure_propagates(self):
         self.llm.analyze.side_effect = TimeoutError('provider unavailable')

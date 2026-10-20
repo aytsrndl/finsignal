@@ -81,6 +81,8 @@ from the filing period; do not present them as contemporaneous without checking.
 Return the requested schema. Every finding must include a short verbatim quote
 from the supplied filing as evidence. Use empty lists when no supported findings
 exist and explicitly acknowledge unavailable information in narrative fields.
+Copy evidence as a short contiguous passage exactly as it appears in filing_text.
+Do not paraphrase quotes, add quotation marks, or join passages with ellipses.
 """
 
 
@@ -118,19 +120,42 @@ def analyze_sec_filing(ticker: str, *, llm=None, max_filing_chars: int = 800_000
         raise ValueError('The filing contains no usable text.')
     if len(text) > max_filing_chars:
         raise ValueError('Filing exceeds the configured character limit; use a larger-context model and explicitly raise max_filing_chars.')
-    analysis = TenKAnalysis.model_validate(llm.analyze(
-        instructions=SEC_INSTRUCTIONS,
-        payload=json.dumps({'ticker': ticker, 'entity_name': facts.get('entityName'),
-                            'filing_date': filing['filing_date'], 'metrics': metrics.model_dump(),
-                            'filing_text': text}),
-        schema=TenKAnalysis,
-    ))
+    payload = {'ticker': ticker, 'entity_name': facts.get('entityName'),
+               'filing_date': filing['filing_date'], 'metrics': metrics.model_dump(),
+               'filing_text': text}
     normalized_text = ' '.join(text.split())
-    for finding in analysis.major_risks + analysis.business_trends + analysis.red_flags:
-        evidence = ' '.join(finding.evidence.split())
-        if not evidence or evidence not in normalized_text:
-            raise AnalysisError('A finding contains evidence not present in the filing; no report was produced.')
+    evidence_repaired = False
+    for attempt in range(2):
+        analysis = TenKAnalysis.model_validate(llm.analyze(
+            instructions=SEC_INSTRUCTIONS,
+            payload=json.dumps(payload),
+            schema=TenKAnalysis,
+        ))
+        unsupported = []
+        for category in ('major_risks', 'business_trends', 'red_flags'):
+            for index, finding in enumerate(getattr(analysis, category)):
+                evidence = ' '.join(finding.evidence.split())
+                if not evidence or evidence not in normalized_text:
+                    unsupported.append(f'{category}[{index}].evidence')
+        if not unsupported:
+            evidence_repaired = attempt > 0
+            break
+        if attempt == 1:
+            raise AnalysisError(
+                'Evidence still does not match the filing after one corrective retry '
+                f'({", ".join(unsupported)}); no report was produced.'
+            )
+        payload['previous_analysis'] = analysis.model_dump()
+        payload['validation_feedback'] = {
+            'unsupported_fields': unsupported,
+            'required_action': 'Return a complete corrected analysis. Replace unsupported evidence '
+                               'with exact contiguous quotes copied from filing_text, and revise '
+                               'the finding to match. Remove any finding you cannot support. '
+                               'Check every finding, including previously valid ones.',
+        }
     warnings = [f'{name} is unavailable.' for name, metric in metrics.model_dump().items() if metric['value'] is None]
+    if evidence_repaired:
+        warnings.append('Evidence validation required one corrective LLM retry.')
     years = {metric['year'] for metric in metrics.model_dump().values() if metric['year'] is not None}
     if len(years) > 1:
         warnings.append('Metrics span different fiscal years; inspect each metric year.')
@@ -154,9 +179,12 @@ def main():
     parser.add_argument('ticker')
     parser.add_argument('--model', help='Override FINSIGNAL_LLM_MODEL.')
     args = parser.parse_args()
-    from clients.llm import StructuredLLM
+    from clients.llm import AnalysisError, StructuredLLM
     try:
         report = analyze_sec_filing(args.ticker, llm=StructuredLLM(model=args.model))
+    except (ValueError, AnalysisError) as error:
+        print(f'SEC analysis failed: {error}', file=sys.stderr)
+        return 1
     except Exception as error:
         # Provider exception messages can include request data; do not print them.
         print(f'SEC analysis failed ({type(error).__name__}). Check SEC_USER_AGENT, API configuration, network access, and filing/model limits.', file=sys.stderr)

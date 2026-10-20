@@ -199,5 +199,9 @@ explicitly adjust `max_filing_chars` for their selected model. This character
 limit is only a size guard, not a token-count or context-window guarantee.
 Finding evidence must match the extracted filing after whitespace normalization;
 this checks quotation presence, not whether the interpretation is correct.
+If evidence does not match, the agent makes at most one additional LLM request
+with the original filing and the validation failures, asking for exact quotes or
+removal of unsupported findings. This retry incurs additional provider usage.
+All findings are checked again; a successful correction is noted in report warnings.
 Provider/network errors and unsupported evidence fail the report instead of
 returning an invented analysis. No investment decision is produced by this agent.
