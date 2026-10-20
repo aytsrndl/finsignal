@@ -36,7 +36,7 @@ Agents communicate through structured JSON rather than natural language, which k
 - 10-K fetching and HTML-to-text extraction (done, validated on AAPL and WMT)
 - Structured OpenAI analysis using the `TenKAnalysis` Pydantic schema
 - Filing source metadata, per-metric fiscal years, and explicit missing-data warnings
-- Evidence-quote checks and failure handling for incomplete/refused responses
+- Source-passage citations and failure handling for incomplete/refused responses
 - Callable agent and JSON CLI, covered with mocked provider responses
 
 ## Example output
@@ -197,11 +197,16 @@ The full extracted filing goes to the model, with no silent truncation. Filings
 above 800,000 characters are rejected before an LLM call; Python callers can
 explicitly adjust `max_filing_chars` for their selected model. This character
 limit is only a size guard, not a token-count or context-window guarantee.
-Finding evidence must match the extracted filing after whitespace normalization;
-this checks quotation presence, not whether the interpretation is correct.
-If evidence does not match, the agent makes at most one additional LLM request
-with the original filing and the validation failures, asking for exact quotes or
-removal of unsupported findings. This retry incurs additional provider usage.
-All findings are checked again; a successful correction is noted in report warnings.
-Provider/network errors and unsupported evidence fail the report instead of
-returning an invented analysis. No investment decision is produced by this agent.
+The filing is indexed into passages of at most 1,200 characters without dropping
+or rewriting any extracted text. The LLM cites passage IDs; Python inserts those
+exact source passages into each finding's `evidence` field. The public report
+schema is unchanged, though evidence may now include a longer passage for context.
+This guarantees that evidence text comes from the filing, but does not establish
+that the passage supports the model's interpretation. Review the evidence alongside
+the finding.
+
+Unknown passage IDs trigger at most one corrective LLM request, with the source
+passages and validation failures. This retry incurs additional provider usage.
+Every citation is rechecked; a successful correction is noted in report warnings.
+Provider/network errors and unresolved unknown IDs fail the report. No investment
+decision is produced by this agent.

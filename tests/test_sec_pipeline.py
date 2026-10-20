@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from agents.sec_filing_agent import analyze_sec_filing, TenKAnalysis, main
+from agents.sec_filing_agent import analyze_sec_filing, TenKAnalysis, CitedTenKAnalysis, filing_passages, main
 from clients.llm import AnalysisError, StructuredLLM
 from tools import edgar_parser as edgar
 
@@ -13,9 +13,9 @@ from tools import edgar_parser as edgar
 class SECPipelineTests(unittest.TestCase):
     def setUp(self):
         self.facts = json.loads((Path(__file__).parent / 'fixtures/company_facts.json').read_text())
-        self.analysis = TenKAnalysis(business_summary='Example company', major_risks=[{
+        self.analysis = CitedTenKAnalysis(business_summary='Example company', major_risks=[{
             'title': 'Supplier risk', 'explanation': 'Supplier concentration.',
-            'evidence': 'We depend on a single supplier.'}], business_trends=[],
+            'evidence_id': 'P000001'}], business_trends=[],
             management_outlook='Not available.', red_flags=[])
         self.llm = Mock(model='test-model')
         self.llm.analyze.return_value = self.analysis
@@ -36,8 +36,8 @@ class SECPipelineTests(unittest.TestCase):
         self.assertIn('123261/annual.htm', report.source.document_url)
         payload = json.loads(self.llm.analyze.call_args.kwargs['payload'])
         self.assertEqual(payload['metrics']['roe']['year'], '2025')
-        self.assertEqual(payload['filing_text'], 'We depend on a single supplier.')
-        self.assertEqual(self.llm.analyze.call_args.kwargs['schema'], TenKAnalysis)
+        self.assertEqual(payload['filing_passages'], {'P000001': 'We depend on a single supplier.'})
+        self.assertEqual(self.llm.analyze.call_args.kwargs['schema'], CitedTenKAnalysis)
         json.loads(report.model_dump_json())
 
     def test_missing_metrics_are_explicit(self):
@@ -60,30 +60,41 @@ class SECPipelineTests(unittest.TestCase):
                     analyze_sec_filing('TEST', llm=self.llm, max_filing_chars=limit)
         self.llm.analyze.assert_not_called()
 
-    def test_fabricated_evidence_rejected(self):
-        self.analysis.major_risks[0].evidence = 'Invented quotation'
+    def test_unknown_passage_id_rejected(self):
+        self.analysis.major_risks[0].evidence_id = 'Invented quotation'
         with self.assertRaisesRegex(AnalysisError, 'after one corrective retry'):
             analyze_sec_filing('TEST', llm=self.llm)
         self.assertEqual(self.llm.analyze.call_count, 2)
 
-    def test_evidence_can_be_corrected_once(self):
+    def test_citation_can_be_corrected_once(self):
         invalid = self.analysis.model_copy(deep=True)
-        invalid.major_risks[0].evidence = 'A paraphrase, not a quote.'
+        invalid.major_risks[0].evidence_id = 'A paraphrase, not a quote.'
         self.llm.analyze.side_effect = [invalid, self.analysis]
         report = analyze_sec_filing('TEST', llm=self.llm)
-        self.assertEqual(report.analysis, self.analysis)
-        self.assertIn('Evidence validation required one corrective LLM retry.', report.warnings)
+        self.assertEqual(report.analysis.major_risks[0].evidence, 'We depend on a single supplier.')
+        self.assertIn('Citation validation required one corrective LLM retry.', report.warnings)
         repair = json.loads(self.llm.analyze.call_args.kwargs['payload'])
-        self.assertEqual(repair['validation_feedback']['unsupported_fields'], ['major_risks[0].evidence'])
-        self.assertEqual(repair['filing_text'], 'We depend on a single supplier.')
+        self.assertEqual(repair['validation_feedback']['unsupported_fields'], ['major_risks[0].evidence_id'])
+        self.assertEqual(repair['filing_passages'], {'P000001': 'We depend on a single supplier.'})
 
     def test_valid_evidence_needs_no_retry(self):
         analyze_sec_filing('TEST', llm=self.llm)
         self.llm.analyze.assert_called_once()
 
+    def test_evidence_is_copied_from_selected_passage(self):
+        source = ('Financial information. ' * 80) + 'Supplier’s terms include “advance payment”.'
+        self.html.return_value = f'<p>{source}</p>'
+        passages = filing_passages(edgar.html_to_text(self.html.return_value))
+        selected_id = list(passages)[-1]
+        self.analysis.major_risks[0].evidence_id = selected_id
+        report = analyze_sec_filing('TEST', llm=self.llm)
+        self.assertEqual(report.analysis.major_risks[0].evidence, passages[selected_id])
+        self.assertIn('“advance payment”', report.analysis.major_risks[0].evidence)
+        self.assertNotIn('evidence_id', report.analysis.major_risks[0].model_dump())
+
     def test_retry_checks_all_finding_categories(self):
         invalid = self.analysis.model_copy(deep=True)
-        invalid.major_risks[0].evidence = 'Invented quote'
+        invalid.major_risks[0].evidence_id = 'Invented quote'
         corrected = self.analysis.model_copy(deep=True)
         corrected.red_flags = [invalid.major_risks[0]]
         self.llm.analyze.side_effect = [invalid, corrected]
@@ -93,7 +104,7 @@ class SECPipelineTests(unittest.TestCase):
 
     def test_unsupported_finding_can_be_removed(self):
         invalid = self.analysis.model_copy(deep=True)
-        invalid.major_risks[0].evidence = ''
+        invalid.major_risks[0].evidence_id = ''
         corrected = self.analysis.model_copy(deep=True)
         corrected.major_risks = []
         self.llm.analyze.side_effect = [invalid, corrected]
@@ -120,6 +131,21 @@ class SECPipelineTests(unittest.TestCase):
         with patch('sys.argv', ['sec-agent', 'TEST']), patch('agents.sec_filing_agent.analyze_sec_filing', side_effect=RuntimeError('sensitive request')), patch('sys.stderr', new_callable=StringIO) as stderr:
             self.assertEqual(main(), 1)
             self.assertNotIn('sensitive request', stderr.getvalue())
+
+
+class FilingPassageTests(unittest.TestCase):
+    def test_passages_preserve_entire_source(self):
+        for source in ('', 'One short sentence.', 'word ' * 900, 'x' * 2501,
+                       'Supplier’s terms\ninclude “advance payment”. ' * 100):
+            with self.subTest(length=len(source)):
+                passages = filing_passages(source)
+                self.assertEqual(''.join(passages.values()), source)
+                self.assertTrue(all(0 < len(value) <= 1200 for value in passages.values()))
+                self.assertEqual(passages, filing_passages(source))
+
+    def test_invalid_size_rejected(self):
+        with self.assertRaises(ValueError):
+            filing_passages('source', max_chars=0)
 
 
 class StructuredLLMTests(unittest.TestCase):
