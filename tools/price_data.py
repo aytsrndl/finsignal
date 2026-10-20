@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from tools.price_http import price_session
+
 
 class PriceDataError(ValueError):
     """Price history is missing, malformed, or unavailable."""
@@ -69,10 +71,12 @@ def fetch_price_history(ticker: str) -> PriceHistory:
         cache_dir = Path(__file__).resolve().parents[1] / 'data' / 'cache' / 'yfinance'
         cache_dir.mkdir(parents=True, exist_ok=True)
         yf.set_tz_cache_location(str(cache_dir))
-        instrument = yf.Ticker(provider_symbol)
-        frame = instrument.history(period='2y', interval='1d', auto_adjust=False,
-                                   back_adjust=False, actions=False, timeout=30,
-                                   keepna=True, raise_errors=True)
+        with price_session() as session:
+            instrument = yf.Ticker(provider_symbol, **({'session': session} if session is not None else {}))
+            frame = instrument.history(period='2y', interval='1d', auto_adjust=False,
+                                       back_adjust=False, actions=False, timeout=30,
+                                       keepna=True, raise_errors=True)
+            metadata = (instrument.history_metadata or {}) if not frame.empty else {}
         if frame.empty:
             raise PriceDataError(f'No daily prices returned for {symbol}.')
         required = {'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume'}
@@ -88,7 +92,6 @@ def fetch_price_history(ticker: str) -> PriceHistory:
         warnings = []
         if len(complete) < len(frame):
             warnings.append('Current-date bars excluded to avoid using an incomplete session.')
-        metadata = instrument.history_metadata or {}
         return PriceHistory(ticker=symbol, provider='yahoo_finance',
                             provider_symbol=provider_symbol,
                             source=f'https://finance.yahoo.com/quote/{provider_symbol}/history/',

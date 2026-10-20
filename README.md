@@ -292,3 +292,14 @@ The corresponding parser functions are now `calculate_liabilities_to_equity`
 and `calculate_liabilities_to_assets`. Calculations are unchanged: the numerator
 is total liabilities (assets minus equity), not interest-bearing debt. This is an
 intentional breaking schema correction; update consumers of the old names.
+
+### Windows paths containing non-ASCII characters
+
+On Windows, `curl_cffi` uses the system code page for certificate-file paths.
+A virtual environment inside a directory such as `Документы` may therefore
+raise `UnicodeEncodeError` before requesting prices. The price adapter preserves
+the selected CA bundle and, when its path cannot be encoded, copies its exact
+contents into a private temporary directory for the request. TLS verification
+remains enabled, and the temporary copy is removed afterward. No project move
+or change to `.env` is needed. If both TEMP and LocalAppData paths are unusable,
+configure TEMP to a writable ASCII-only directory before starting Python.

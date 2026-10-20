@@ -57,6 +57,15 @@ class PriceDataTests(unittest.TestCase):
         self.assertTrue(instrument.history.call_args.kwargs['keepna'])
         self.assertFalse(instrument.history.call_args.kwargs['auto_adjust'])
 
+    def test_windows_safe_session_is_used_by_provider(self):
+        instrument = self.provider()
+        session = Mock()
+        with patch('tools.price_data.price_session') as context, patch('yfinance.Ticker', return_value=instrument) as ticker, patch('yfinance.set_tz_cache_location'):
+            context.return_value.__enter__.return_value = session
+            fetch_price_history('TEST')
+        ticker.assert_called_once_with('TEST', session=session)
+        context.return_value.__exit__.assert_called_once()
+
     def test_empty_missing_and_nonfinite_provider_data_fail(self):
         instrument = self.provider()
         original = instrument.history.return_value
