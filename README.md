@@ -2,7 +2,7 @@
 
 A hybrid multi-agent system for stock analysis. Specialized code and ML models handle the numbers; LLMs handle interpretation and synthesis.
 
-> **Status: in active development.** The SEC Filing Agent has a metrics-to-LLM pipeline with offline tests. Live LLM validation is pending. The Technical Agent computes daily signals; Sentiment, Risk, and Portfolio Manager agents are planned. See [Status](#status).
+> **Status: in active development.** The SEC Filing Agent has a metrics-to-LLM pipeline with offline tests. Live LLM validation is pending. The Technical Agent computes daily signals; The Sentiment Agent pipeline is implemented with live validation pending; Risk and Portfolio Manager agents are planned. See [Status](#status).
 
 ## Core idea
 
@@ -15,7 +15,7 @@ Five agents. Four specialists feed structured JSON into a Portfolio Manager that
 | Agent | Question it answers | Compute engine | LLM role | Status |
 |---|---|---|---|---|
 | **SEC Filing** | What is the company, fundamentally? | Python (EDGAR / XBRL) | Risk analysis from 10-K text | Pipeline implemented; live LLM validation pending |
-| **Sentiment** | What is the market feeling? | FinBERT | Summarize mood, flag divergences | Planned |
+| **Sentiment** | What is the news tone? | FinBERT | Optional cited summary | Pipeline implemented; live feed and pretrained weights pending |
 | **Technical** | What is price action saying? | Python / yfinance | Optional future interpretation | Deterministic indicators and JSON CLI implemented; cloud live fetch blocked |
 | **Risk Manager** | How much could this hurt the portfolio? | NumPy (VaR, correlation) | Write risk memo | Planned |
 | **Portfolio Manager** | What do we do? | none | Pure LLM synthesis | Planned |
@@ -153,7 +153,7 @@ python -m tools.edgar_parser
 
 1. Validate the SEC Filing Agent against live SEC data and OpenAI responses
 2. Validate Technical Agent live data access; indicators and offline CLI implemented
-3. Sentiment Agent (FinBERT)
+3. Validate Sentiment Agent against live Finnhub news and pretrained FinBERT
 4. Risk Manager Agent
 5. Portfolio Manager Agent and orchestration
 6. Streamlit frontend and demo
@@ -303,3 +303,96 @@ contents into a private temporary directory for the request. TLS verification
 remains enabled, and the temporary copy is removed afterward. No project move
 or change to `.env` is needed. If both TEMP and LocalAppData paths are unusable,
 configure TEMP to a writable ASCII-only directory before starting Python.
+
+## Sentiment Agent
+
+The first version scores financial-news **headlines and provider summaries** with
+`ProsusAI/finbert` on CPU. It does not fetch full article bodies, Reddit, or X.
+Finnhub is the initial news provider. Create a Finnhub API key with company-news
+access and put it in your gitignored `.env`:
+
+```dotenv
+FINNHUB_API_KEY=your-finnhub-key
+```
+
+Install the optional model dependencies in your active Python 3.12 environment:
+
+```sh
+python -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements-sentiment.txt
+python -m agents.sentiment_agent AAPL
+```
+
+The CPU PyTorch index avoids installing unnecessary CUDA packages. The first
+nonempty run downloads the public FinBERT tokenizer and weights into the ignored
+`data/cache/huggingface/` directory. Allow enough disk space for PyTorch and the
+model. No OpenAI key is required for scoring. A public model normally requires
+no Hugging Face token. Remote custom model code is disabled; weight loading uses
+PyTorch's restricted `weights_only` loader. No untrained or heuristic fallback is
+used when weights are unavailable.
+
+Optional OpenAI commentary is a separate paid request using your existing
+`OPENAI_API_KEY` and `FINSIGNAL_LLM_MODEL` settings:
+
+```sh
+python -m agents.sentiment_agent AAPL --days 7 --max-articles 100 --llm
+```
+
+The report includes per-article URLs, publication times, sources, probabilities,
+labels, input-truncation flags, and the aggregate. Its `finbert_score` is the
+**equal-weight mean of P(positive) minus P(negative)** over unique selected news,
+in [-1,1]. Default thresholds are >=0.15 for bullish and <=-0.15 for bearish;
+intermediate values are neutral. These are descriptive news-tone labels, not
+return predictions or calibrated investment confidence. Per-article label counts
+use each article's highest-probability class and need not match the aggregate
+signal direction. There is no recency or source-quality weighting.
+
+The agent filters out future and out-of-window articles, then deduplicates by
+article ID, normalized headline, or URL with common tracking parameters removed.
+It scores the most recent unique articles up to the limit. Exact publication
+boundaries and counts of removed, filtered, and omitted articles are reported.
+FinBERT uses at most 512 tokens per article; truncation is explicit. Sparse feeds
+(fewer than five articles) produce a warning. An empty feed returns
+`status: "no_news"`, null score, and `signal: "unavailable"` without loading the
+model. Failed retrieval or scoring is an error, not neutral sentiment.
+
+Optional commentary must cite existing article IDs; that verifies reference
+existence, not whether its interpretation is supported. No historical narrative
+shift or news/social divergence is inferred without the corresponding data.
+Coverage is limited to the provider response and the requested window, and
+syndication may still bias the result. The model's financial-text sentiment is
+not necessarily sentiment toward the requested company.
+
+To supply news offline, use `--news-json path/to/news.json` with this shape:
+
+```json
+{
+  "ticker": "AAPL",
+  "provider": "user_supplied",
+  "retrieved_at": "2026-10-21T00:00:00Z",
+  "articles": [
+    {
+      "article_id": "example-1",
+      "headline": "Example headline, replace with real news",
+      "summary": "Example summary",
+      "source": "Example publisher",
+      "url": "https://example.com/news/example-1",
+      "published_at": "2026-10-20T12:00:00Z"
+    }
+  ]
+}
+```
+
+Supplied files must match the requested ticker; they are not independently
+verified for relevance. Nonempty offline input still needs downloaded FinBERT
+weights. `--local-files-only` prevents downloads once weights are cached, and
+`--revision COMMIT_SHA` pins a model version. Default `main` is mutable; the report
+records the resolved model commit when available.
+
+Run `python -m unittest discover -s tests -v` for offline checks. The CPU model
+smoke test uses a tiny locally initialized BERT and is skipped when optional
+model dependencies are absent. It verifies runtime integration, not trained
+FinBERT accuracy. Pretrained-model validation and live news retrieval remain
+unverified in the cloud: `huggingface.co` and `finnhub.io` requests were blocked by
+the proxy, and no Finnhub key was available. Live model downloads can also require
+Hugging Face artifact/CDN hosts shown by their redirects.

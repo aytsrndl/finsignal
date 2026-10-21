@@ -9,6 +9,20 @@ was rejected. Newest entries at the top.
 
 ---
 
+## Sentiment Agent — first version
+
+Use one news provider (Finnhub) and FinBERT to score headlines plus summaries.
+Keep score computation deterministic once model probabilities are given: equal
+weights and mean P(positive)-P(negative). An empty feed is unavailable rather than
+neutral. Preserve article-level evidence, remove obvious duplicates, and disclose
+sparse coverage and 512-token truncation. Keep CPU inference dependencies optional
+so SEC and technical development do not require a model installation. LLM commentary
+is optional and separate from computed sentiment. The provider key travels in an
+HTTP header, never a query parameter. Do not substitute heuristic scores when
+FinBERT cannot load. Live pretrained-model validation is still required.
+
+---
+
 ## Technical Agent — first version
 
 Use a shared validated `PriceHistory` as the boundary between price retrieval,
