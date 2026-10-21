@@ -44,18 +44,22 @@ class PriceDataTests(unittest.TestCase):
         return instrument
 
     def test_provider_preserves_adjustments_and_excludes_today(self):
-        instrument = self.provider()
-        with patch('yfinance.Ticker', return_value=instrument) as ticker, patch('yfinance.set_tz_cache_location'):
-            history = fetch_price_history(' brk.b ')
-        ticker.assert_called_once_with('BRK-B')
-        self.assertEqual(history.ticker, 'BRK.B')
-        self.assertEqual(len(history.bars), 1)
-        self.assertEqual(history.bars[0].close, 101)
-        self.assertEqual(history.bars[0].adjusted_close, 50.5)
-        self.assertEqual(history.currency, 'USD')
-        self.assertTrue(history.warnings)
-        self.assertTrue(instrument.history.call_args.kwargs['keepna'])
-        self.assertFalse(instrument.history.call_args.kwargs['auto_adjust'])
+        for session in (None, Mock()):
+            with self.subTest(explicit_session=session is not None):
+                instrument = self.provider()
+                with patch('tools.price_data.price_session') as context, patch('yfinance.Ticker', return_value=instrument) as ticker, patch('yfinance.set_tz_cache_location'):
+                    context.return_value.__enter__.return_value = session
+                    history = fetch_price_history(' brk.b ')
+                expected = {'session': session} if session is not None else {}
+                ticker.assert_called_once_with('BRK-B', **expected)
+                self.assertEqual(history.ticker, 'BRK.B')
+                self.assertEqual(len(history.bars), 1)
+                self.assertEqual(history.bars[0].close, 101)
+                self.assertEqual(history.bars[0].adjusted_close, 50.5)
+                self.assertEqual(history.currency, 'USD')
+                self.assertTrue(history.warnings)
+                self.assertTrue(instrument.history.call_args.kwargs['keepna'])
+                self.assertFalse(instrument.history.call_args.kwargs['auto_adjust'])
 
     def test_windows_safe_session_is_used_by_provider(self):
         instrument = self.provider()
