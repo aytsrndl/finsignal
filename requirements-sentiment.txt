@@ -1,0 +1,4 @@
+# Optional CPU FinBERT inference. Install torch from the CPU index first (README).
+-r requirements.txt
+torch==2.9.0
+transformers==4.57.1

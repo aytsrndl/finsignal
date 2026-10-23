@@ -2,7 +2,7 @@
 
 A hybrid multi-agent system for stock analysis. Specialized code and ML models handle the numbers; LLMs handle interpretation and synthesis.
 
-> **Status: in active development.** The SEC Filing Agent's quantitative layer is complete and validated. Its LLM layer is in progress. The other four agents are planned. See [Status](#status).
+> **Status: in active development.** The SEC Filing Agent has a metrics-to-LLM pipeline with offline tests. Live LLM validation is pending. The Technical Agent computes daily signals; The Sentiment Agent pipeline is implemented with live validation pending; Risk and Portfolio Manager agents are planned. See [Status](#status).
 
 ## Core idea
 
@@ -14,9 +14,9 @@ Five agents. Four specialists feed structured JSON into a Portfolio Manager that
 
 | Agent | Question it answers | Compute engine | LLM role | Status |
 |---|---|---|---|---|
-| **SEC Filing** | What is the company, fundamentally? | Python (EDGAR / XBRL) | Risk analysis from 10-K text | Quant layer done, LLM layer in progress |
-| **Sentiment** | What is the market feeling? | FinBERT | Summarize mood, flag divergences | Planned |
-| **Technical** | What is price action saying? | pandas / ta | Interpret signal convergence | Planned |
+| **SEC Filing** | What is the company, fundamentally? | Python (EDGAR / XBRL) | Risk analysis from 10-K text | Pipeline implemented; live LLM validation pending |
+| **Sentiment** | What is the news tone? | FinBERT | Optional cited summary | Pipeline implemented; live feed and pretrained weights pending |
+| **Technical** | What is price action saying? | Python / yfinance | Optional future interpretation | Deterministic indicators and JSON CLI implemented; cloud live fetch blocked |
 | **Risk Manager** | How much could this hurt the portfolio? | NumPy (VaR, correlation) | Write risk memo | Planned |
 | **Portfolio Manager** | What do we do? | none | Pure LLM synthesis | Planned |
 
@@ -27,15 +27,17 @@ Agents communicate through structured JSON rather than natural language, which k
 **SEC Filing Agent, quantitative layer (done):**
 - Ticker to CIK lookup, filing list, and filing URL construction against SEC EDGAR
 - Company Facts (XBRL) extraction, cleaned into deduplicated annual series
-- Seven metrics: revenue growth, net income growth, net margin, debt-to-equity, debt-to-assets, current ratio, ROE
+- Seven metrics: revenue growth, net income growth, net margin, liabilities-to-equity, liabilities-to-assets, current ratio, ROE
 - Tag-robust resolvers for revenue and net income, and total liabilities derived from the accounting identity (`Assets - Equity`) instead of a tag lookup
 - Structured JSON output via `build_sec_metrics(ticker)`
 - Validated on AAPL, MSFT, WMT, and GOOGL
 
-**SEC Filing Agent, qualitative layer (in progress):**
+**SEC Filing Agent, qualitative layer (implemented, live LLM validation pending):**
 - 10-K fetching and HTML-to-text extraction (done, validated on AAPL and WMT)
-- Pydantic schema for structured LLM output (scaffolded in `agents/sec_filing_agent.py`)
-- LLM analysis call (next)
+- Structured OpenAI analysis using the `TenKAnalysis` Pydantic schema
+- Filing source metadata, per-metric fiscal years, and explicit missing-data warnings
+- Source-passage citations and failure handling for incomplete/refused responses
+- Callable agent and JSON CLI, covered with mocked provider responses
 
 ## Example output
 
@@ -48,8 +50,8 @@ Agents communicate through structured JSON rather than natural language, which k
   "revenue_growth":    {"value": 0.064, "year": "2025"},
   "net_income_growth": {"value": 0.195, "year": "2025"},
   "net_margin":        {"value": 0.269, "year": "2025"},
-  "debt_to_equity":    {"value": 3.87,  "year": "2025"},
-  "debt_to_assets":    {"value": 0.79,  "year": "2025"},
+  "liabilities_to_equity":    {"value": 3.87,  "year": "2025"},
+  "liabilities_to_assets":    {"value": 0.79,  "year": "2025"},
   "current_ratio":     {"value": 0.89,  "year": "2025"},
   "roe":               {"value": 1.52,  "year": "2025"}
 }
@@ -78,12 +80,19 @@ python -m venv venv
 python -m pip install -r requirements.txt
 ```
 
-**SEC User-Agent (required).** The SEC requires requests to identify the requester. Edit `USER_AGENT` in `tools/edgar_parser.py` to your own name and email.
+**SEC User-Agent (required for live requests).** The SEC requires requests to identify the requester. Set `SEC_USER_AGENT` in your environment or in a gitignored `.env` file in the project root:
 
-**LLM API key.** Create a `.env` file in the project root (it is gitignored) containing your provider key, for example:
+```dotenv
+SEC_USER_AGENT="Your Name your-email@example.com"
+```
+
+The parser can be imported without making network requests. Live requests fail with a configuration error if `SEC_USER_AGENT` is missing and use a 30-second timeout.
+
+**LLM API key (required for qualitative analysis).** Add your OpenAI key to the gitignored `.env` file, for example:
 
 ```
 OPENAI_API_KEY=your-key-here
+FINSIGNAL_LLM_MODEL=gpt-4.1-mini
 ```
 
 Never commit this file.
@@ -105,14 +114,30 @@ text = html_to_text(get_latest_10k_html(get_cik_from_ticker("AAPL")))
 ```
 finsignal/
 ├── agents/
-│   └── sec_filing_agent.py   # LLM analysis layer (in progress)
+│   └── sec_filing_agent.py   # SEC report pipeline and JSON CLI
 ├── tools/
 │   └── edgar_parser.py       # EDGAR retrieval, metrics, 10-K text extraction
 ├── DECISIONS.md              # Design-decision log with reasoning
 └── requirements.txt
 ```
 
-Planned additions: the remaining four agents, an orchestrator, a SQLite portfolio store, a Streamlit frontend, and automated tests.
+Planned additions: the remaining four agents, an orchestrator, a SQLite portfolio store, and a Streamlit frontend.
+
+## Tests
+
+Run the offline suite from the repository root with your virtual environment active:
+
+```sh
+python -m unittest discover -s tests -v
+```
+
+The suite uses synthetic company-facts fixtures and mocked HTTP responses. It covers the seven metrics, annual-series handling, tag fallbacks, missing values, zero denominators, request configuration, filing retrieval, HTML extraction, and qualitative schemas. It requires no SEC access or API credentials. Live SEC access remains a separate integration check.
+
+To run the Walmart filing demo with SEC access configured:
+
+```sh
+python -m tools.edgar_parser
+```
 
 ## Known limitations
 
@@ -121,14 +146,14 @@ Planned additions: the remaining four agents, an orchestrator, a SQLite portfoli
 - ROE uses year-end equity rather than average equity.
 - Extracted 10-K text still contains some harmless XBRL header noise.
 - Validated on a handful of large US companies. Banks and other unusual balance sheets are untested.
-- Manual sanity checks only. Automated tests are planned.
+- Offline automated tests use synthetic data; broad validation against live filings remains limited.
 - In production, the parsing layer would likely be replaced by a commercial data vendor. It was built here to understand the problem directly.
 
 ## Roadmap
 
-1. Finish the SEC Filing Agent's LLM analysis and package it behind a single ticker-in, JSON-out interface
-2. Technical Agent (yfinance and indicators)
-3. Sentiment Agent (FinBERT)
+1. Validate the SEC Filing Agent against live SEC data and OpenAI responses
+2. Validate Technical Agent live data access; indicators and offline CLI implemented
+3. Validate Sentiment Agent against live Finnhub news and pretrained FinBERT
 4. Risk Manager Agent
 5. Portfolio Manager Agent and orchestration
 6. Streamlit frontend and demo
@@ -137,3 +162,237 @@ Planned additions: the remaining four agents, an orchestrator, a SQLite portfoli
 
 FinSignal is an educational project. Nothing it outputs is investment advice.
 
+
+## SEC analysis CLI
+
+With `SEC_USER_AGENT` and `OPENAI_API_KEY` configured, run from the repository root:
+
+```sh
+python -m agents.sec_filing_agent AAPL
+# Optional model override:
+python -m agents.sec_filing_agent AAPL --model gpt-4.1-mini
+```
+
+The CLI writes a JSON report to stdout, or a short error to stderr with a nonzero
+exit status. Requests use the configured model (`FINSIGNAL_LLM_MODEL`, default
+`gpt-4.1-mini`); your account must have access to a model supporting Responses API
+structured outputs. Live runs incur provider usage charges. No API key is needed
+for the offline suite.
+
+You can also call the agent directly:
+
+```python
+from agents.sec_filing_agent import analyze_sec_filing
+
+report = analyze_sec_filing("AAPL")
+print(report.model_dump_json(indent=2))
+```
+
+Reports include seven metrics, their fiscal years, the latest 10-K's date and URL,
+a retrieval timestamp, qualitative analysis, model name, and warnings. Company
+Facts can contain data newer than the selected annual filing; this is not a
+historical point-in-time analysis. Missing metrics remain null.
+
+The full extracted filing goes to the model, with no silent truncation. Filings
+above 800,000 characters are rejected before an LLM call; Python callers can
+explicitly adjust `max_filing_chars` for their selected model. This character
+limit is only a size guard, not a token-count or context-window guarantee.
+The filing is indexed into passages of at most 1,200 characters without dropping
+or rewriting any extracted text. The LLM cites passage IDs; Python inserts those
+exact source passages into each finding's `evidence` field. The public report
+schema is unchanged, though evidence may now include a longer passage for context.
+This guarantees that evidence text comes from the filing, but does not establish
+that the passage supports the model's interpretation. Review the evidence alongside
+the finding.
+
+Unknown passage IDs trigger at most one corrective LLM request, with the source
+passages and validation failures. This retry incurs additional provider usage.
+Every citation is rechecked; a successful correction is noted in report warnings.
+Provider/network errors and unresolved unknown IDs fail the report. No investment
+decision is produced by this agent.
+
+## Technical Agent
+
+Install the updated dependencies in your active Python 3.12 virtual environment:
+
+```sh
+python -m pip install -r requirements.txt
+python -m agents.technical_agent AAPL
+```
+
+No LLM or API key is required. The initial interpretation is generated from
+calculated signals; LLM commentary can be added later without changing the math.
+The CLI writes JSON to stdout or an error to stderr with exit status 1.
+
+The shared price adapter requests two years of daily OHLCV from Yahoo Finance
+through `yfinance`. Symbols such as `BRK.B` map to Yahoo's `BRK-B` while reports
+retain the input symbol. Network access may require `query1.finance.yahoo.com`,
+`query2.finance.yahoo.com`, and `fc.yahoo.com`; follow any provider redirects
+when diagnosing your environment's policy. The cloud live check failed with a
+proxy CONNECT 403, so live price retrieval has not been verified here.
+
+Reports include source, currency, retrieval time, latest bar date, history length,
+raw and adjusted latest close, warnings, and the following indicators:
+
+| Indicator | Convention |
+|---|---|
+| RSI(14) | Wilder smoothing; needs 15 closes; flat=50, gains only=100, losses only=0 |
+| SMA(50), SMA(200) | Arithmetic average of adjusted closes |
+| MACD(12,26,9) | SMA-seeded EMAs; signal and histogram available after 34 closes |
+| Relative volume | Latest volume divided by the preceding 20 sessions' average, excluding the latest session |
+| Trailing range | Minimum adjusted low and maximum adjusted high over 20 sessions |
+
+Price indicators use split- and dividend-adjusted closes. Daily highs/lows are
+scaled by that day's adjusted-close/close ratio for the trailing range. These
+levels are on the adjusted basis, not necessarily historical executable prices.
+Volume uses provider-reported units. The current exchange-local date is always
+excluded, even after market close, to avoid partial-session contamination. It
+becomes eligible on the following day. Missing, nonfinite, duplicate, unsorted,
+or inconsistent OHLCV inputs fail validation rather than being filled silently.
+Short histories produce null indicators and explicit warnings. Dates more than
+seven calendar days old are flagged as potentially stale. There is no exchange
+calendar reconciliation, persistent analysis cache, or cross-provider verification.
+
+Moving-average and MACD crosses describe events between the previous and latest
+bars. Being above a moving average alone is not reported as a new crossover.
+Trend is up only when adjusted price is above both averages and SMA50 is above
+SMA200; the reverse is a downtrend, other complete cases are mixed. RSI thresholds
+are 70/30. These rules describe historical data and do not issue BUY/HOLD/SELL
+recommendations or calibrated forecasts. Trailing extremes are not proven
+support/resistance levels.
+
+For offline development, use the synthetic, steadily rising fixture:
+
+```sh
+python -m agents.technical_agent TEST --prices-csv tests/fixtures/prices.csv --currency USD
+python -m unittest discover -s tests -v
+```
+
+CSV input requires `date,open,high,low,close,adjusted_close,volume`, in ascending
+unique date order. Adjustments, symbol identity, and session completeness of a CSV
+are the caller's responsibility. The fixture is synthetic and intentionally old,
+so a stale-data warning is expected.
+
+The price history can be fetched once and shared with future agents:
+
+```python
+from tools.price_data import fetch_price_history
+from agents.technical_agent import analyze_technical
+
+history = fetch_price_history("AAPL")
+technical_report = analyze_technical("AAPL", history=history)
+# A future risk agent can consume the same history without downloading it again.
+```
+
+### SEC ratio naming correction
+
+The SEC output keys and Pydantic fields formerly named `debt_to_equity` and
+`debt_to_assets` are now `liabilities_to_equity` and `liabilities_to_assets`.
+The corresponding parser functions are now `calculate_liabilities_to_equity`
+and `calculate_liabilities_to_assets`. Calculations are unchanged: the numerator
+is total liabilities (assets minus equity), not interest-bearing debt. This is an
+intentional breaking schema correction; update consumers of the old names.
+
+### Windows paths containing non-ASCII characters
+
+On Windows, `curl_cffi` uses the system code page for certificate-file paths.
+A virtual environment inside a directory such as `Документы` may therefore
+raise `UnicodeEncodeError` before requesting prices. The price adapter preserves
+the selected CA bundle and, when its path cannot be encoded, copies its exact
+contents into a private temporary directory for the request. TLS verification
+remains enabled, and the temporary copy is removed afterward. No project move
+or change to `.env` is needed. If both TEMP and LocalAppData paths are unusable,
+configure TEMP to a writable ASCII-only directory before starting Python.
+
+## Sentiment Agent
+
+The first version scores financial-news **headlines and provider summaries** with
+`ProsusAI/finbert` on CPU. It does not fetch full article bodies, Reddit, or X.
+Finnhub is the initial news provider. Create a Finnhub API key with company-news
+access and put it in your gitignored `.env`:
+
+```dotenv
+FINNHUB_API_KEY=your-finnhub-key
+```
+
+Install the optional model dependencies in your active Python 3.12 environment:
+
+```sh
+python -m pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements-sentiment.txt
+python -m agents.sentiment_agent AAPL
+```
+
+The CPU PyTorch index avoids installing unnecessary CUDA packages. The first
+nonempty run downloads the public FinBERT tokenizer and weights into the ignored
+`data/cache/huggingface/` directory. Allow enough disk space for PyTorch and the
+model. No OpenAI key is required for scoring. A public model normally requires
+no Hugging Face token. Remote custom model code is disabled; weight loading uses
+PyTorch's restricted `weights_only` loader. No untrained or heuristic fallback is
+used when weights are unavailable.
+
+Optional OpenAI commentary is a separate paid request using your existing
+`OPENAI_API_KEY` and `FINSIGNAL_LLM_MODEL` settings:
+
+```sh
+python -m agents.sentiment_agent AAPL --days 7 --max-articles 100 --llm
+```
+
+The report includes per-article URLs, publication times, sources, probabilities,
+labels, input-truncation flags, and the aggregate. Its `finbert_score` is the
+**equal-weight mean of P(positive) minus P(negative)** over unique selected news,
+in [-1,1]. Default thresholds are >=0.15 for bullish and <=-0.15 for bearish;
+intermediate values are neutral. These are descriptive news-tone labels, not
+return predictions or calibrated investment confidence. Per-article label counts
+use each article's highest-probability class and need not match the aggregate
+signal direction. There is no recency or source-quality weighting.
+
+The agent filters out future and out-of-window articles, then deduplicates by
+article ID, normalized headline, or URL with common tracking parameters removed.
+It scores the most recent unique articles up to the limit. Exact publication
+boundaries and counts of removed, filtered, and omitted articles are reported.
+FinBERT uses at most 512 tokens per article; truncation is explicit. Sparse feeds
+(fewer than five articles) produce a warning. An empty feed returns
+`status: "no_news"`, null score, and `signal: "unavailable"` without loading the
+model. Failed retrieval or scoring is an error, not neutral sentiment.
+
+Optional commentary must cite existing article IDs; that verifies reference
+existence, not whether its interpretation is supported. No historical narrative
+shift or news/social divergence is inferred without the corresponding data.
+Coverage is limited to the provider response and the requested window, and
+syndication may still bias the result. The model's financial-text sentiment is
+not necessarily sentiment toward the requested company.
+
+To supply news offline, use `--news-json path/to/news.json` with this shape:
+
+```json
+{
+  "ticker": "AAPL",
+  "provider": "user_supplied",
+  "retrieved_at": "2026-10-21T00:00:00Z",
+  "articles": [
+    {
+      "article_id": "example-1",
+      "headline": "Example headline, replace with real news",
+      "summary": "Example summary",
+      "source": "Example publisher",
+      "url": "https://example.com/news/example-1",
+      "published_at": "2026-10-20T12:00:00Z"
+    }
+  ]
+}
+```
+
+Supplied files must match the requested ticker; they are not independently
+verified for relevance. Nonempty offline input still needs downloaded FinBERT
+weights. `--local-files-only` prevents downloads once weights are cached, and
+`--revision COMMIT_SHA` pins a model version. Default `main` is mutable; the report
+records the resolved model commit when available.
+
+Run `python -m unittest discover -s tests -v` for offline checks. The CPU model
+smoke test uses a tiny locally initialized BERT and is skipped when optional
+model dependencies are absent. It verifies runtime integration, not trained
+FinBERT accuracy. Pretrained-model validation and live news retrieval remain
+unverified in the cloud: `huggingface.co` and `finnhub.io` requests were blocked by
+the proxy, and no Finnhub key was available. Live model downloads can also require
+Hugging Face artifact/CDN hosts shown by their redirects.

@@ -3,15 +3,28 @@ EDGAR Parser - tools for fetching and parsing EDGAR data
 """
 
 import requests
-import json
+import os
+from pathlib import Path
 from bs4 import BeautifulSoup
 import re
-from openai import OpenAI
-from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
 # SEC requires a header for request identification
 # Format: "Your Name your-email@domain.com"
-USER_AGENT = "Aytunc Sarandal aytsrndl@gmail.com"
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+REQUEST_TIMEOUT = 30
+
+
+def _get(url):
+    """Fetch SEC data with explicit requester identification and a timeout."""
+    user_agent = os.environ.get("SEC_USER_AGENT", "").strip()
+    if not user_agent:
+        raise ValueError("Set SEC_USER_AGENT to your name and contact email before requesting SEC data.")
+    response = requests.get(
+        url, headers={"User-Agent": user_agent}, timeout=REQUEST_TIMEOUT
+    )
+    response.raise_for_status()
+    return response
 
 # SEC's public ticker-to-CIK mapping file
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -42,8 +55,7 @@ def get_cik_from_ticker(ticker):
     Raises:
     ValueError: If the ticker is not found in the SEC mapping.
     """
-    response = requests.get(TICKERS_URL, headers={"User-Agent": USER_AGENT})
-    response.raise_for_status()
+    response = _get(TICKERS_URL)
     tickers_data = response.json()
 
     # The data is a dict of dicts, keyed by index, each with 'ticker' and 'cik_str'
@@ -68,8 +80,7 @@ def get_recent_filings(cik, form_types = ("10-K", "10-Q"), limit=10):
     # SEC's EDGAR API endpoint for company filings
     EDGAR_API_URL = f"https://data.sec.gov/submissions/CIK{cik}.json"
 
-    response = requests.get(EDGAR_API_URL, headers={"User-Agent": USER_AGENT})
-    response.raise_for_status()
+    response = _get(EDGAR_API_URL)
     data = response.json()
 
 
@@ -117,8 +128,7 @@ def get_company_facts(cik):
     Dictionary containing company facts data.
     """
     FACTS_API_URL = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
-    response = requests.get(FACTS_API_URL, headers = {"User-Agent": USER_AGENT})
-    response.raise_for_status()
+    response = _get(FACTS_API_URL)
     data = response.json()
     return data
 
@@ -384,9 +394,9 @@ def _ratio_from_series(numerator_series, denominator_series, min_year=None):
 
     return sorted(ratios, key=lambda x: x["year"])
 
-def calculate_debt_to_equity(facts):
+def calculate_liabilities_to_equity(facts):
     """
-    Calculate the Debt-to-Equity ratio for all years available.
+    Calculate the Liabilities-to-Equity ratio for all years available.
 
     """
     liabilities = get_total_liabilities(facts)
@@ -400,9 +410,9 @@ def calculate_current_ratio(facts):
     """
     return calculate_ratio(facts, "AssetsCurrent", "LiabilitiesCurrent")
 
-def calculate_debt_to_assets(facts):
+def calculate_liabilities_to_assets(facts):
     """
-    Calculate the Debt-to-Assets (total liabilities / total assets) ratio for all years available.
+    Calculate the Liabilities-to-Assets (total liabilities / total assets) ratio for all years available.
 
     """
     liabilities = get_total_liabilities(facts)
@@ -442,13 +452,18 @@ def build_sec_metrics(ticker):
             - revenue
             - net_income
             - net_margin
-            - debt_to_equity
+            - liabilities_to_equity
             - current_ratio
-            - debt_to_assets
+            - liabilities_to_assets
             - roe
     """
     cik = get_cik_from_ticker(ticker)
     facts = get_company_facts(cik)
+    return metrics_from_facts(ticker, facts)
+
+
+def metrics_from_facts(ticker, facts):
+    """Compute the seven metrics from already fetched Company Facts data."""
 
     def safe(fn, value_key, *args):
         """Run a metric function, return latest {value, year}, or None on failure."""
@@ -463,8 +478,8 @@ def build_sec_metrics(ticker):
         "revenue_growth":    safe(lambda f: calculate_growth(get_revenue(f)), "growth", facts),
         "net_income_growth": safe(lambda f: calculate_growth(get_net_income(f)), "growth", facts),
         "net_margin":        safe(calculate_net_margin, "net_margin", facts),
-        "debt_to_equity":    safe(calculate_debt_to_equity, "ratio", facts),
-        "debt_to_assets":    safe(calculate_debt_to_assets, "ratio", facts),
+        "liabilities_to_equity":    safe(calculate_liabilities_to_equity, "ratio", facts),
+        "liabilities_to_assets":    safe(calculate_liabilities_to_assets, "ratio", facts),
         "current_ratio":     safe(calculate_current_ratio, "ratio", facts),
         "roe":               safe(calculate_roe, "ratio", facts),
     }
@@ -484,9 +499,12 @@ def get_latest_10k_html(cik):
         raise ValueError(f"No 10-K filings found for CIK {cik}")
     latest = filings[0]
     url = build_filing_url(cik, latest["accession_number"], latest["primary_document"])
-    response = requests.get(url, headers={"User-Agent": USER_AGENT})
-    response.raise_for_status()
-    return response.text
+    return get_filing_html(url)
+
+
+def get_filing_html(url):
+    """Fetch a filing document using the same SEC request configuration."""
+    return _get(url).text
 
 def html_to_text(html):
     """
@@ -510,11 +528,11 @@ def html_to_text(html):
     return text
 
 
-html = get_latest_10k_html(get_cik_from_ticker("WMT"))
-print(f"Raw HTML: {len(html):,} characters")
-
-text = html_to_text(html)
-print(f"Stripped text: {len(text):,} characters")
-print(f"\nFirst 500 chars of text:\n{text[:500]}")
+if __name__ == "__main__":
+    html = get_latest_10k_html(get_cik_from_ticker("WMT"))
+    print(f"Raw HTML: {len(html):,} characters")
+    text = html_to_text(html)
+    print(f"Stripped text: {len(text):,} characters")
+    print(f"\nFirst 500 chars of text:\n{text[:500]}")
 
 
