@@ -2,8 +2,6 @@
 
 A hybrid multi-agent system for stock analysis. Specialized code and ML models handle the numbers; LLMs handle interpretation and synthesis.
 
-> **Status: in active development.** The SEC Filing Agent has a metrics-to-LLM pipeline with offline tests. Live LLM validation is pending. The Technical Agent computes daily signals; The Sentiment Agent pipeline is implemented with live validation pending; Risk and Portfolio Manager agents are planned. See [Status](#status).
-
 ## Core idea
 
 Code and ML models do what they're good at: speed, precision, math. LLMs do what they're good at: reasoning, interpretation, synthesis. Each agent computes exact numbers with code, then hands structured JSON to an LLM (or, for the final agent, to a decision-making LLM). The LLM only ever reasons about numbers it didn't invent.
